@@ -8,24 +8,44 @@ Cache is written atomically (write to tmp file, then rename) so readers
 always get a consistent snapshot. If this process crashes, the DBUS bridge
 just serves the last cached values.
 """
-import sys, os, socket, struct, json, time, configparser, logging
+import sys, os, socket, struct, json, time, configparser, logging, subprocess
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("conext-poller")
+
+def dbus_get(path):
+    """Read a setting from Venus localsettings via CLI."""
+    try:
+        r = subprocess.run(
+            ["dbus", "-y", "com.victronenergy.settings", path, "GetValue"],
+            capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            val = r.stdout.strip()
+            if val.startswith("'") and val.endswith("'"):
+                val = val[1:-1]
+            return val
+    except Exception:
+        pass
+    return None
 
 CFG = configparser.ConfigParser()
 CFG_PATH = "/data/dbus-conext-bridge/config.ini"
 if os.path.exists(CFG_PATH):
     CFG.read(CFG_PATH)
 
-CONEXT_IP = CFG.get("modbus", "ip", fallback="192.168.1.223")
-CONEXT_PORT = CFG.getint("modbus", "port", fallback=503)
+# Try DBUS settings first (set by GX UI), fall back to config.ini
+CONEXT_IP = dbus_get("/Settings/ConextBridge/GatewayIp") or \
+            CFG.get("modbus", "ip", fallback="192.168.1.223")
+_port = dbus_get("/Settings/ConextBridge/GatewayPort")
+CONEXT_PORT = int(_port) if _port else CFG.getint("modbus", "port", fallback=503)
 MODBUS_TIMEOUT = CFG.getfloat("modbus", "timeout", fallback=1.0)
 
-_unit_ids = CFG.get("inverters", "unit_ids", fallback="11,12")
-UNIT_IDS = [int(x.strip()) for x in _unit_ids.split(",")]
-POLL_INTERVAL = CFG.getfloat("inverters", "poll_interval_ms", fallback=3000) / 1000.0
+_ids = dbus_get("/Settings/ConextBridge/UnitIds") or \
+       CFG.get("inverters", "unit_ids", fallback="11,12")
+UNIT_IDS = [int(x.strip()) for x in _ids.split(",")]
+_poll = dbus_get("/Settings/ConextBridge/PollInterval")
+POLL_INTERVAL = (int(_poll) if _poll else CFG.getint("inverters", "poll_interval_ms", fallback=3000)) / 1000.0
 
 CACHE_PATH = "/tmp/conext_cache.json"
 CACHE_TMP = "/tmp/conext_cache.tmp"

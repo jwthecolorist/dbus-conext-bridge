@@ -17,20 +17,39 @@ from dbus.mainloop.glib import DBusGMainLoop
 sys.path.insert(1, "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python")
 from vedbus import VeDbusService
 
-# --- Load config ---
+def dbus_get(path):
+    """Read a setting from Venus localsettings via CLI."""
+    try:
+        r = subprocess.run(
+            ["dbus", "-y", "com.victronenergy.settings", path, "GetValue"],
+            capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            val = r.stdout.strip()
+            if val.startswith("'") and val.endswith("'"):
+                val = val[1:-1]
+            return val
+    except Exception:
+        pass
+    return None
+
+# --- Load config: DBUS settings first, config.ini fallback ---
 CFG = configparser.ConfigParser()
 CFG_PATH = "/data/dbus-conext-bridge/config.ini"
 if os.path.exists(CFG_PATH):
     CFG.read(CFG_PATH)
 
-_unit_ids = CFG.get("inverters", "unit_ids", fallback="11,12")
-UNIT_IDS = [int(x.strip()) for x in _unit_ids.split(",")]
+_ids = dbus_get("/Settings/ConextBridge/UnitIds") or \
+       CFG.get("inverters", "unit_ids", fallback="11,12")
+UNIT_IDS = [int(x.strip()) for x in _ids.split(",")]
 UNIT_L1 = UNIT_IDS[0]
 UNIT_L2 = UNIT_IDS[1] if len(UNIT_IDS) > 1 else UNIT_IDS[0]
-NUM_UNITS = CFG.getint("inverters", "count", fallback=len(UNIT_IDS))
+_cnt = dbus_get("/Settings/ConextBridge/UnitCount")
+NUM_UNITS = int(_cnt) if _cnt else CFG.getint("inverters", "count", fallback=len(UNIT_IDS))
 
-CONEXT_IP = CFG.get("modbus", "ip", fallback="192.168.1.223")
-CONEXT_PORT = CFG.getint("modbus", "port", fallback=503)
+CONEXT_IP = dbus_get("/Settings/ConextBridge/GatewayIp") or \
+            CFG.get("modbus", "ip", fallback="192.168.1.223")
+_port = dbus_get("/Settings/ConextBridge/GatewayPort")
+CONEXT_PORT = int(_port) if _port else CFG.getint("modbus", "port", fallback=503)
 
 PRODUCT_ID = 2623
 FIRMWARE_VERSION = 1170500

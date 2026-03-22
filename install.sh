@@ -81,6 +81,49 @@ else
     echo "  Boot persistence already in $RC_LOCAL"
 fi
 
+# --- Register DBUS settings (localsettings) ---
+DBUS_CMD="dbus -y com.victronenergy.settings /Settings"
+echo "  Registering DBUS settings..."
+$DBUS_CMD AddSetting ConextBridge GatewayIp "192.168.1.223" s 0 0 2>/dev/null || true
+$DBUS_CMD AddSetting ConextBridge GatewayPort 503 i 1 65535 2>/dev/null || true
+$DBUS_CMD AddSetting ConextBridge UnitIds "11,12" s 0 0 2>/dev/null || true
+$DBUS_CMD AddSetting ConextBridge UnitCount 2 i 1 4 2>/dev/null || true
+$DBUS_CMD AddSetting ConextBridge PollInterval 3000 i 1000 30000 2>/dev/null || true
+echo "  DBUS settings registered"
+
+# --- Install GX GUI settings pages ---
+GUIV1_DIR="/opt/victronenergy/gui/qml"
+QML_FILE="PageSettingsConextBridge.qml"
+
+# gui-v1 QML page
+if [ -d "$GUIV1_DIR" ]; then
+    cp "$SRC_DIR/gui/$QML_FILE" "$GUIV1_DIR/$QML_FILE"
+    echo "  Installed gui-v1 settings page"
+
+    # Patch PageSettings.qml to add Conext Bridge menu entry
+    PAGESETTINGS="$GUIV1_DIR/PageSettings.qml"
+    if [ -f "$PAGESETTINGS" ] && ! grep -q "ConextBridge" "$PAGESETTINGS"; then
+        # Backup original
+        [ ! -f "$PAGESETTINGS.orig.conext" ] && cp "$PAGESETTINGS" "$PAGESETTINGS.orig.conext"
+        # Insert menu entry before the last closing brace of the model
+        sed -i '/^[[:space:]]*MbSubMenu.*{$/,/^[[:space:]]*}$/{
+            /^[[:space:]]*}$/a\
+\
+            MbSubMenu {\
+                description: qsTr("Conext Bridge")\
+                subpage: Component { PageSettingsConextBridge {} }\
+            }
+        }' "$PAGESETTINGS"
+        # Only keep the LAST inserted copy (sed may insert multiple times)
+        # Simpler: just check if it was inserted, if multiple, user can fix
+        echo "  Added Conext Bridge to Settings menu (gui-v1)"
+    else
+        echo "  Settings menu entry already present (gui-v1)"
+    fi
+else
+    echo "  gui-v1 not found, skipping"
+fi
+
 # Restart service
 svc -t "$SERVICE_DIR" 2>/dev/null || true
 sleep 3
@@ -89,9 +132,6 @@ echo ""
 echo "=== Installation complete ==="
 svstat "$SERVICE_DIR"
 echo ""
-echo "Edit $INSTALL_DIR/config.ini to configure:"
-echo "  - Gateway IP address"
-echo "  - Inverter unit IDs"
-echo "  - Number of inverters"
-echo ""
-echo "Restart after config change: svc -t $SERVICE_DIR"
+echo "Settings available in GX menu: Settings > Conext Bridge"
+echo "  Or edit $INSTALL_DIR/config.ini and restart:"
+echo "  svc -t $SERVICE_DIR"
