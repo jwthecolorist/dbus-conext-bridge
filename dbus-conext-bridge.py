@@ -48,29 +48,33 @@ REGS = {
     "DCVoltage":       (80,2,">I",0.001),
     "DCCurrent":       (82,2,">i",0.001),
     "DCPower":         (84,2,">i",1),
-    # AC Input 1 (Grid/Shore)
+    # AC Input 1 (Grid/Shore) — each unit reports both legs
     "AC1Frequency":    (97,1,">H",0.01),
     "AC1Power":        (102,2,">i",1),
     "AC1L1Voltage":    (110,2,">I",0.001),
+    "AC1L2Voltage":    (112,2,">I",0.001),
     "AC1L1Current":    (116,2,">i",0.001),
-    # AC Input 2 (Generator) — mirrors AC1 layout with +28 offset
+    # AC Input 2 (Generator)
     "AC2Frequency":    (125,1,">H",0.01),
     "AC2Power":        (130,2,">i",1),
     "AC2L1Voltage":    (138,2,">I",0.001),
     "AC2L1Current":    (140,2,">i",0.001),
-    # AC Output (Load)
+    # AC Output (Load) — each unit reports both legs
+    "ACLoadL1Voltage": (142,2,">I",0.001),
+    "ACLoadL2Voltage": (144,2,">I",0.001),
+    "ACLoadL1Current": (146,2,">i",0.001),
+    "ACLoadL2Current": (148,2,">i",0.001),
     "ACLoadFrequency": (152,1,">H",0.01),
     "ACLoadPower":     (154,2,">i",1),
-    "ACLoadL1Voltage": (142,2,">I",0.001),
-    "ACLoadL1Current": (146,2,">i",0.001),
 }
 
 POLL_KEYS = [
     "DeviceState","InverterEnabled","ChargerEnabled",
     "DCVoltage","DCCurrent","DCPower",
-    "AC1Frequency","AC1Power","AC1L1Voltage","AC1L1Current",
+    "AC1Frequency","AC1Power","AC1L1Voltage","AC1L2Voltage","AC1L1Current",
     "AC2Frequency","AC2Power","AC2L1Voltage","AC2L1Current",
-    "ACLoadFrequency","ACLoadPower","ACLoadL1Voltage","ACLoadL1Current",
+    "ACLoadL1Voltage","ACLoadL2Voltage","ACLoadL1Current","ACLoadL2Current",
+    "ACLoadFrequency","ACLoadPower",
 ]
 
 class ModbusTCP:
@@ -168,8 +172,10 @@ class ConextBridge:
 
     def _on_current_limit_change(self, path, value):
         """Venus requests AC input current limit change.
-        Accepted on DBUS. No direct Conext register equivalent yet."""
-        log.warning("CONTROL %s -> %.1fA (accepted, no Conext write)", path, value)
+        Divides by NUM_UNITS and logs. No direct Conext register write yet."""
+        per_unit = value / NUM_UNITS
+        log.warning("CONTROL %s -> %.1fA total (%.1fA per unit x%d)",
+                    path, value, per_unit, NUM_UNITS)
         return True
 
     def _on_control_change(self, path, value):
@@ -223,7 +229,7 @@ class ConextBridge:
             s["/Dc/0/Power"] = round(dc_power)
             s["/Dc/0/Temperature"] = None  # Conext returns sentinels; battery provides this
 
-            # === AC Input 1 (Grid/Shore): L1 from unit 11, L2 from unit 12 ===
+            # === AC Input 1 (Grid/Shore): each unit reports both L1 and L2 ===
             ac1_f1 = l1.get("AC1Frequency")
             ac1_f2 = l2.get("AC1Frequency")
             ac1_freq = ac1_f1 if ac1_f1 and ac1_f1 > 0 else ac1_f2
@@ -231,7 +237,7 @@ class ConextBridge:
             if ac1_freq and ac1_freq > 100: ac1_freq = None
             ac1_connected = 1 if ac1_freq and ac1_freq > 45 else 0
 
-            # === AC Input 2 (Generator): L1 from unit 11, L2 from unit 12 ===
+            # === AC Input 2 (Generator): each unit reports both L1 and L2 ===
             ac2_f1 = l1.get("AC2Frequency")
             ac2_f2 = l2.get("AC2Frequency")
             ac2_freq = ac2_f1 if ac2_f1 and ac2_f1 > 0 else ac2_f2
@@ -256,41 +262,56 @@ class ConextBridge:
 
             # Populate ActiveIn with whichever input is active
             if active_input == 0:
-                # AC1 active
-                s["/Ac/ActiveIn/L1/F"] = ac1_f1 if ac1_f1 and 0 < ac1_f1 < 100 else None
-                s["/Ac/ActiveIn/L1/V"] = l1.get("AC1L1Voltage")
-                s["/Ac/ActiveIn/L1/I"] = l1.get("AC1L1Current")
-                s["/Ac/ActiveIn/L1/P"] = l1.get("AC1Power")
-                s["/Ac/ActiveIn/L2/F"] = ac1_f2 if ac1_f2 and 0 < ac1_f2 < 100 else None
-                s["/Ac/ActiveIn/L2/V"] = l2.get("AC1L1Voltage")
-                s["/Ac/ActiveIn/L2/I"] = l2.get("AC1L1Current")
-                s["/Ac/ActiveIn/L2/P"] = l2.get("AC1Power")
+                # AC1 active — each unit has both legs
+                s["/Ac/ActiveIn/L1/F"] = ac1_freq
+                s["/Ac/ActiveIn/L1/V"] = l2.get("AC1L1Voltage") or l1.get("AC1L1Voltage")
+                ac1_l1_i = (l1.get("AC1L1Current") or 0) + (l2.get("AC1L1Current") or 0)
+                s["/Ac/ActiveIn/L1/I"] = round(ac1_l1_i, 2)
+                s["/Ac/ActiveIn/L1/P"] = round(ac1_l1_i * (l2.get("AC1L1Voltage") or 120))
+                s["/Ac/ActiveIn/L2/F"] = ac1_freq
+                s["/Ac/ActiveIn/L2/V"] = l2.get("AC1L2Voltage") or l1.get("AC1L2Voltage")
+                s["/Ac/ActiveIn/L2/I"] = None  # No L2 AC1 current register found yet
+                s["/Ac/ActiveIn/L2/P"] = None
                 ac_in_total = (l1.get("AC1Power") or 0) + (l2.get("AC1Power") or 0)
             else:
-                # AC2 active
-                s["/Ac/ActiveIn/L1/F"] = ac2_f1 if ac2_f1 and 0 < ac2_f1 < 100 else None
-                s["/Ac/ActiveIn/L1/V"] = l1.get("AC2L1Voltage")
-                s["/Ac/ActiveIn/L1/I"] = l1.get("AC2L1Current")
-                s["/Ac/ActiveIn/L1/P"] = l1.get("AC2Power")
-                s["/Ac/ActiveIn/L2/F"] = ac2_f2 if ac2_f2 and 0 < ac2_f2 < 100 else None
-                s["/Ac/ActiveIn/L2/V"] = l2.get("AC2L1Voltage")
-                s["/Ac/ActiveIn/L2/I"] = l2.get("AC2L1Current")
-                s["/Ac/ActiveIn/L2/P"] = l2.get("AC2Power")
+                # AC2 active — each unit has both legs
+                s["/Ac/ActiveIn/L1/F"] = ac2_freq
+                s["/Ac/ActiveIn/L1/V"] = l2.get("AC2L1Voltage") or l1.get("AC2L1Voltage")
+                ac2_l1_i = (l1.get("AC2L1Current") or 0) + (l2.get("AC2L1Current") or 0)
+                s["/Ac/ActiveIn/L1/I"] = round(ac2_l1_i, 2)
+                s["/Ac/ActiveIn/L1/P"] = round(ac2_l1_i * (l2.get("AC2L1Voltage") or 120))
+                s["/Ac/ActiveIn/L2/F"] = ac2_freq
+                s["/Ac/ActiveIn/L2/V"] = None  # No L2 AC2 voltage register found yet
+                s["/Ac/ActiveIn/L2/I"] = None
+                s["/Ac/ActiveIn/L2/P"] = None
                 ac_in_total = (l1.get("AC2Power") or 0) + (l2.get("AC2Power") or 0)
             s["/Ac/ActiveIn/P"] = round(ac_in_total)
 
-            # AC Output (Load): L1 from unit 11, L2 from unit 12
+            # AC Output (Load): each unit reports both L1 and L2
+            # Voltage: from master (same bus), Current/Power: sum from both units
             lf1 = l1.get("ACLoadFrequency")
             lf2 = l2.get("ACLoadFrequency")
             load_freq = lf1 if lf1 and lf1 > 0 else lf2
-            s["/Ac/Out/L1/F"] = lf1 if lf1 and lf1 > 0 else load_freq
-            s["/Ac/Out/L1/V"] = l1.get("ACLoadL1Voltage")
-            s["/Ac/Out/L1/I"] = l1.get("ACLoadL1Current")
-            s["/Ac/Out/L1/P"] = l1.get("ACLoadPower")
-            s["/Ac/Out/L2/F"] = lf2 if lf2 and lf2 > 0 else load_freq
-            s["/Ac/Out/L2/V"] = l2.get("ACLoadL1Voltage")
-            s["/Ac/Out/L2/I"] = l2.get("ACLoadL1Current")
-            s["/Ac/Out/L2/P"] = l2.get("ACLoadPower")
+
+            # L1: voltage from master, current summed
+            s["/Ac/Out/L1/F"] = load_freq
+            s["/Ac/Out/L1/V"] = l2.get("ACLoadL1Voltage") or l1.get("ACLoadL1Voltage")
+            l1_i1 = l1.get("ACLoadL1Current") or 0
+            l1_i2 = l2.get("ACLoadL1Current") or 0
+            s["/Ac/Out/L1/I"] = round(l1_i1 + l1_i2, 2)
+            l1_v = l2.get("ACLoadL1Voltage") or l1.get("ACLoadL1Voltage") or 120
+            s["/Ac/Out/L1/P"] = round((l1_i1 + l1_i2) * l1_v)
+
+            # L2: voltage from master, current summed
+            s["/Ac/Out/L2/F"] = load_freq
+            s["/Ac/Out/L2/V"] = l2.get("ACLoadL2Voltage") or l1.get("ACLoadL2Voltage")
+            l2_i1 = l1.get("ACLoadL2Current") or 0
+            l2_i2 = l2.get("ACLoadL2Current") or 0
+            s["/Ac/Out/L2/I"] = round(l2_i1 + l2_i2, 2)
+            l2_v = l2.get("ACLoadL2Voltage") or l1.get("ACLoadL2Voltage") or 120
+            s["/Ac/Out/L2/P"] = round((l2_i1 + l2_i2) * l2_v)
+
+            # Total load: sum of both units' total power
             load_total = (l1.get("ACLoadPower") or 0) + (l2.get("ACLoadPower") or 0)
             s["/Ac/Out/P"] = round(load_total)
 
