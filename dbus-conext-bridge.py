@@ -298,22 +298,30 @@ class ConextBridge:
             s["/Ac/Out/L1/V"] = l2.get("ACLoadL1Voltage") or l1.get("ACLoadL1Voltage")
             l1_i1 = l1.get("ACLoadL1Current") or 0
             l1_i2 = l2.get("ACLoadL1Current") or 0
-            s["/Ac/Out/L1/I"] = round(l1_i1 + l1_i2, 2)
-            l1_v = l2.get("ACLoadL1Voltage") or l1.get("ACLoadL1Voltage") or 120
-            s["/Ac/Out/L1/P"] = round((l1_i1 + l1_i2) * l1_v)
+            total_l1_i = l1_i1 + l1_i2
+            s["/Ac/Out/L1/I"] = round(total_l1_i, 2)
 
             # L2: voltage from master, current summed
             s["/Ac/Out/L2/F"] = load_freq
             s["/Ac/Out/L2/V"] = l2.get("ACLoadL2Voltage") or l1.get("ACLoadL2Voltage")
             l2_i1 = l1.get("ACLoadL2Current") or 0
             l2_i2 = l2.get("ACLoadL2Current") or 0
-            s["/Ac/Out/L2/I"] = round(l2_i1 + l2_i2, 2)
-            l2_v = l2.get("ACLoadL2Voltage") or l1.get("ACLoadL2Voltage") or 120
-            s["/Ac/Out/L2/P"] = round((l2_i1 + l2_i2) * l2_v)
+            total_l2_i = l2_i1 + l2_i2
+            s["/Ac/Out/L2/I"] = round(total_l2_i, 2)
 
-            # Total load: sum of both units' total power
+            # Total load from ACLoadPower registers (real power, both legs)
             load_total = (l1.get("ACLoadPower") or 0) + (l2.get("ACLoadPower") or 0)
             s["/Ac/Out/P"] = round(load_total)
+
+            # Distribute total across L1/L2 by current ratio
+            # (Venus Essential Loads = L1/P + L2/P, must equal total)
+            total_i = total_l1_i + total_l2_i
+            if total_i > 0:
+                s["/Ac/Out/L1/P"] = round(load_total * total_l1_i / total_i)
+                s["/Ac/Out/L2/P"] = round(load_total * total_l2_i / total_i)
+            else:
+                s["/Ac/Out/L1/P"] = 0
+                s["/Ac/Out/L2/P"] = 0
 
             # State mapping: Venus values: 0=Off 3=Bulk 4=Abs 5=Float 8=Passthru 9=Inverting
             # Conext DeviceState: 0=Standby 1=Search 2=Charging 3=Operating
