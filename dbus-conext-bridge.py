@@ -184,6 +184,7 @@ class ConextBridge:
         return struct.unpack(fmt, raw[:struct.calcsize(fmt)])[0] * scale
 
     def poll_unit(self, uid):
+        """Read all registers for one unit using individual reads (proven reliable)."""
         d = {}
         for name in POLL_KEYS:
             try:
