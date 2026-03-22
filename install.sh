@@ -98,6 +98,7 @@ $DBUS_CMD AddSetting ConextBridge GatewayPort 503 i 1 65535 2>/dev/null || true
 $DBUS_CMD AddSetting ConextBridge UnitIds "11,12" s 0 0 2>/dev/null || true
 $DBUS_CMD AddSetting ConextBridge UnitCount 2 i 1 4 2>/dev/null || true
 $DBUS_CMD AddSetting ConextBridge PollInterval 3000 i 1000 30000 2>/dev/null || true
+$DBUS_CMD AddSetting ConextBridge RestartRequested 0 i 0 1 2>/dev/null || true
 echo "  DBUS settings registered"
 
 # --- Install GX GUI settings pages ---

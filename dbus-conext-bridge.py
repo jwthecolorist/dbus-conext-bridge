@@ -247,9 +247,32 @@ class ConextBridge:
             if self._update_count % 10 == 0:
                 self._check_settings_change(units)
 
+            # Check for immediate restart request from GUI Apply button
+            self._check_restart_requested()
+
         except Exception as e:
             log.warning("DBUS update error: %s", e)
         return True
+
+    def _check_restart_requested(self):
+        """Check if GUI Apply button was pressed (RestartRequested=1). Restart if so."""
+        try:
+            r = subprocess.run(
+                ["dbus", "-y", "com.victronenergy.settings",
+                 "/Settings/ConextBridge/RestartRequested", "GetValue"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1)
+            if r.returncode == 0:
+                val = r.stdout.decode().strip()
+                if val == "1" or val == "'1'":
+                    log.warning("Apply button pressed! Restarting service...")
+                    # Reset the flag first
+                    subprocess.run(
+                        ["dbus", "-y", "com.victronenergy.settings",
+                         "/Settings/ConextBridge/RestartRequested", "SetValue", "0"],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1)
+                    os.system("svc -t /service/dbus-conext-bridge &")
+        except Exception:
+            pass  # Non-critical
 
     def _check_settings_change(self, cache_data):
         """Check if GX UI settings changed. If so, restart service to apply."""

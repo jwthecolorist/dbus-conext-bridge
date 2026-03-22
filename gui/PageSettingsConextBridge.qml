@@ -1,84 +1,67 @@
-/////// Conext Bridge settings page (gui-v1)
-///////
-/////// Install to /opt/victronenergy/gui/qml/PageSettingsConextBridge.qml
-
-import QtQuick 1.4
-import "utils.js" as Utils
+import QtQuick 2
 import com.victron.velib 1.0
 
-MbPage
-{
-        id: root
-        title: qsTr("Conext Bridge")
+MbPage {
+title: qsTr("Conext Bridge Settings")
+property string settingsPrefix: "com.victronenergy.settings/Settings/ConextBridge"
 
-        property string settingsPrefix: "com.victronenergy.settings"
-        property string sp: "/Settings/ConextBridge"
+model: VisibleItemModel {
+MbEditBoxIp {
+description: qsTr("Gateway IP")
+item.bind: settingsPrefix + "/GatewayIp"
+}
 
-        model: VisualItemModel
-        {
-                MbItemText
-                {
-                        text: qsTr("Conext XW Pro Bridge Settings")
-                        description: qsTr("Configure gateway connection and inverter units")
-                }
+MbSpinBox {
+description: qsTr("Gateway Port")
+item {
+bind: settingsPrefix + "/GatewayPort"
+min: 1
+max: 65535
+step: 1
+decimals: 0
+}
+}
 
-                MbEditBoxIp
-                {
-                        description: qsTr("Gateway IP Address")
-                        item.bind: Utils.path(settingsPrefix, sp + "/GatewayIp")
-                        showAccessLevel: User.AccessInstaller
-                }
+MbEditBox {
+description: qsTr("Unit IDs (e.g. 11,12)")
+maximumLength: 20
+item.bind: settingsPrefix + "/UnitIds"
+}
 
-                MbEditBox
-                {
-                        description: qsTr("Gateway Port")
-                        item.bind: Utils.path(settingsPrefix, sp + "/GatewayPort")
-                        maximumLength: 5
-                        numericOnlyLayout: true
-                        showAccessLevel: User.AccessInstaller
-                }
+MbSpinBox {
+description: qsTr("Number of Inverters")
+item {
+bind: settingsPrefix + "/UnitCount"
+min: 1
+max: 4
+step: 1
+decimals: 0
+}
+}
 
-                MbEditBox
-                {
-                        description: qsTr("Unit IDs (comma-separated)")
-                        item.bind: Utils.path(settingsPrefix, sp + "/UnitIds")
-                        maximumLength: 20
-                        showAccessLevel: User.AccessInstaller
-                }
+MbSpinBox {
+description: qsTr("Poll Interval (ms)")
+item {
+bind: settingsPrefix + "/PollInterval"
+min: 1000
+max: 10000
+step: 500
+decimals: 0
+}
+}
 
-                MbItemOptions
-                {
-                        description: qsTr("Number of Inverters")
-                        bind: Utils.path(settingsPrefix, sp + "/UnitCount")
-                        possibleValues:
-                        [
-                                MbOption { description: "1"; value: 1 },
-                                MbOption { description: "2"; value: 2 },
-                                MbOption { description: "3"; value: 3 },
-                                MbOption { description: "4"; value: 4 }
-                        ]
-                        showAccessLevel: User.AccessInstaller
-                }
+MbOK {
+description: qsTr("Apply Settings Now")
+value: qsTr("Press to restart bridge")
+onClicked: {
+restartItem.setValue(1)
+toast.createToast(qsTr("Restarting Conext Bridge..."), 3000)
+}
 
-                MbItemOptions
-                {
-                        description: qsTr("Poll Interval")
-                        bind: Utils.path(settingsPrefix, sp + "/PollInterval")
-                        possibleValues:
-                        [
-                                MbOption { description: "1 second"; value: 1000 },
-                                MbOption { description: "2 seconds"; value: 2000 },
-                                MbOption { description: "3 seconds"; value: 3000 },
-                                MbOption { description: "5 seconds"; value: 5000 },
-                                MbOption { description: "10 seconds"; value: 10000 }
-                        ]
-                        showAccessLevel: User.AccessInstaller
-                }
-
-                MbItemText
-                {
-                        text: qsTr("Settings auto-apply")
-                        description: qsTr("Changes are detected and applied\nautomatically within 30 seconds.")
-                }
-        }
+VBusItem {
+id: restartItem
+bind: settingsPrefix + "/RestartRequested"
+}
+}
+}
 }
