@@ -16,9 +16,11 @@ echo ""
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/service/log"
 
-# Copy driver
+# Copy driver files
 cp "$SRC_DIR/dbus-conext-bridge.py" "$INSTALL_DIR/"
-echo "  Installed driver"
+cp "$SRC_DIR/conext-poller.py" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/conext-poller.py"
+echo "  Installed driver (bridge + poller)"
 
 # Copy config (preserve existing)
 if [ -f "$INSTALL_DIR/config.ini" ]; then
@@ -33,7 +35,11 @@ fi
 cat > "$INSTALL_DIR/service/run" << 'EOF'
 #!/bin/sh
 exec 2>&1
-exec python3 /data/dbus-conext-bridge/dbus-conext-bridge.py
+# Start Modbus poller as separate process (writes to /tmp/conext_cache.json)
+python3 -u /data/dbus-conext-bridge/conext-poller.py &
+sleep 3
+# Bridge reads JSON cache only — zero DBUS blocking
+exec python3 -u /data/dbus-conext-bridge/dbus-conext-bridge.py
 EOF
 chmod +x "$INSTALL_DIR/service/run"
 echo "  Created service/run"
