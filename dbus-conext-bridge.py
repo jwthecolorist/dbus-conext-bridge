@@ -65,6 +65,9 @@ class ConextBridge:
         self._poller_proc = None
         self._cache_ts = 0
         self._stale_count = 0
+        self._update_count = 0
+        # Settings fingerprint at startup — used to detect GUI changes
+        self._settings_fp = "%s:%d:%s" % (CONEXT_IP, CONEXT_PORT, ",".join(str(u) for u in UNIT_IDS))
 
     # --- Write callbacks (accepted on DBUS, no Modbus write from this process) ---
     def _on_mode_change(self, path, value):
@@ -239,9 +242,33 @@ class ConextBridge:
                      UNIT_L2, dcv2, l2.get("DCPower",0) or 0, l2.get("ACLoadPower",0) or 0,
                      dc_power, load_total, age)
 
+            # Check for settings changes every ~30s (10 cycles * 3s)
+            self._update_count += 1
+            if self._update_count % 10 == 0:
+                self._check_settings_change(units)
+
         except Exception as e:
             log.warning("DBUS update error: %s", e)
         return True
+
+    def _check_settings_change(self, cache_data):
+        """Check if GX UI settings changed. If so, restart service to apply."""
+        try:
+            with open(CACHE_PATH, "r") as f:
+                data = json.load(f)
+            settings = data.get("settings", {})
+            if not settings:
+                return
+            new_fp = "%s:%s:%s" % (
+                settings.get("ip", ""),
+                settings.get("port", ""),
+                settings.get("unit_ids", ""))
+            if new_fp != self._settings_fp and new_fp != "::":
+                log.warning("Settings changed! '%s' -> '%s'. Restarting service...",
+                            self._settings_fp, new_fp)
+                os.system("svc -t /service/dbus-conext-bridge &")
+        except Exception:
+            pass  # Non-critical — don't crash on settings check
 
     def _ensure_poller(self):
         """Start or restart the poller subprocess if it's not running."""

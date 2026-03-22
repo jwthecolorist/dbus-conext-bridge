@@ -144,6 +144,12 @@ def write_cache(units):
     data = {
         "ts": time.time(),
         "units": units,
+        "settings": {
+            "ip": CONEXT_IP,
+            "port": CONEXT_PORT,
+            "unit_ids": ",".join(str(u) for u in UNIT_IDS),
+            "poll_ms": int(POLL_INTERVAL * 1000),
+        }
     }
     try:
         with open(CACHE_TMP, "w") as f:

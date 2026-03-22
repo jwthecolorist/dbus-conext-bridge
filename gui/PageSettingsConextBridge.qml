@@ -77,8 +77,8 @@ MbPage
 
                 MbItemText
                 {
-                        text: qsTr("After changing settings")
-                        description: qsTr("Changes apply on next service restart.\nGo to Settings > Services to restart.")
+                        text: qsTr("Settings auto-apply")
+                        description: qsTr("Changes are detected and applied\nautomatically within 30 seconds.")
                 }
         }
 }
