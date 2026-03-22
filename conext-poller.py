@@ -19,9 +19,9 @@ def dbus_get(path):
     try:
         r = subprocess.run(
             ["dbus", "-y", "com.victronenergy.settings", path, "GetValue"],
-            capture_output=True, text=True, timeout=3)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1)
         if r.returncode == 0:
-            val = r.stdout.strip()
+            val = r.stdout.decode().strip()
             if val.startswith("'") and val.endswith("'"):
                 val = val[1:-1]
             return val

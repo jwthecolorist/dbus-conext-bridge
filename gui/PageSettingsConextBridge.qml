@@ -77,8 +77,8 @@ MbPage
 
                 MbItemText
                 {
-                        text: qsTr("Note")
-                        description: qsTr("Restart service after changes:\nsvc -t /service/dbus-conext-bridge")
+                        text: qsTr("After changing settings")
+                        description: qsTr("Changes apply on next service restart.\nGo to Settings > Services to restart.")
                 }
         }
 }

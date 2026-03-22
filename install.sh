@@ -37,7 +37,7 @@ cat > "$INSTALL_DIR/service/run" << 'EOF'
 exec 2>&1
 # Start Modbus poller as separate process (writes to /tmp/conext_cache.json)
 python3 -u /data/dbus-conext-bridge/conext-poller.py &
-sleep 3
+sleep 8
 # Bridge reads JSON cache only — zero DBUS blocking
 exec python3 -u /data/dbus-conext-bridge/dbus-conext-bridge.py
 EOF
