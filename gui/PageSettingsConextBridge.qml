@@ -10,10 +10,14 @@ property VBusItem restartItem: VBusItem { bind: settingsPrefix + "/RestartReques
 property VBusItem statusItem: VBusItem { bind: "com.victronenergy.vebus.conext_0/Connected" }
 
 model: VisibleItemModel {
-MbItemValue {
+MbItemOptions {
 description: qsTr("Driver Status")
-value: statusItem.valid ? (statusItem.value === 1 ? qsTr("Connected") : qsTr("Offline")) : qsTr("Service Down")
-
+bind: "com.victronenergy.vebus.conext_0/Connected"
+readonly: true
+possibleValues: [
+MbOption { description: qsTr("Offline"); value: 0 },
+MbOption { description: qsTr("Connected"); value: 1 }
+]
 }
 
 MbEditBoxIp {
