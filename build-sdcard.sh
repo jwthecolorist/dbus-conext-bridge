@@ -52,13 +52,15 @@ logger "conext-bridge: Running setup..."
 # 0. Self-register in rc.local (idempotent)
 if [ -f /data/rc.local ]; then
     if ! grep -q 'dbus-conext-bridge/setup.sh' /data/rc.local 2>/dev/null; then
+        sed -i '/^exit 0/d' /data/rc.local
         echo "" >> /data/rc.local
         echo "# --- Conext Bridge (auto-installed) ---" >> /data/rc.local
         echo "[ -x /data/dbus-conext-bridge/setup.sh ] && /data/dbus-conext-bridge/setup.sh" >> /data/rc.local
+        echo "exit 0" >> /data/rc.local
         logger "conext-bridge: Registered in rc.local"
     fi
 else
-    printf '#!/bin/sh\n# --- Conext Bridge (auto-installed) ---\n[ -x /data/dbus-conext-bridge/setup.sh ] && /data/dbus-conext-bridge/setup.sh\n' > /data/rc.local
+    printf '#!/bin/sh\n# --- Conext Bridge (auto-installed) ---\n[ -x /data/dbus-conext-bridge/setup.sh ] && /data/dbus-conext-bridge/setup.sh\nexit 0\n' > /data/rc.local
     chmod +x /data/rc.local
     logger "conext-bridge: Created rc.local with setup hook"
 fi
