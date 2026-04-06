@@ -57,8 +57,10 @@ def check_modbus_uid(ip, uid):
         s.settimeout(MODBUS_TIMEOUT)
         try:
             s.connect((ip, PORT))
-            # Modbus Read Holding Registers: reg 64 (DeviceState)
-            req = struct.pack(">HHHBBHH", uid, 0, 6, uid, 3, 64, 1)
+            # To filter out MPPT Charge Controllers and BMS devices on the Conext network,
+            # we read Reg 71 (InverterEnabled) instead of Reg 64 (DeviceState).
+            # MPPTs do not have this register and will return a Modbus Exception.
+            req = struct.pack(">HHHBBHH", uid, 0, 6, uid, 3, 71, 1)
             s.sendall(req)
             mbap = s.recv(6)
             if len(mbap) == 6:
