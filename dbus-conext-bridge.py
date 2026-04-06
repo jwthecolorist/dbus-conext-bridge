@@ -204,6 +204,7 @@ class ConextBridge:
                 if self._stale_count % 30 == 1:
                     log.warning("Cache not available (stale count: %d)", self._stale_count)
                 self._set("/Connected", 0)
+                if self.settings['DriverStatus'] != 0: self.settings['DriverStatus'] = 0
                 return True
 
             # Check freshness (stale if >30s old)
@@ -213,11 +214,13 @@ class ConextBridge:
                 if self._stale_count % 30 == 1:
                     log.warning("Cache stale: %.0fs old (stale count: %d)", age, self._stale_count)
                 self._set("/Connected", 0)
+                if self.settings['DriverStatus'] != 0: self.settings['DriverStatus'] = 0
                 return True
 
             self._stale_count = 0
             self._cache_ts = ts
             self._set("/Connected", 1)
+            if self.settings['DriverStatus'] != 1: self.settings['DriverStatus'] = 1
 
             # Collect data from ALL inverter units
             all_units = [units.get(str(uid), {}) for uid in UNIT_IDS]
@@ -390,7 +393,8 @@ class ConextBridge:
             'UnitCount': ['/Settings/ConextBridge/UnitCount', 2, 0, 4],
             'PollInterval': ['/Settings/ConextBridge/PollInterval', 3000, 1000, 30000],
             'RestartRequested': ['/Settings/ConextBridge/RestartRequested', 0, 0, 1],
-            'ScanRequested': ['/Settings/ConextBridge/ScanRequested', 0, 0, 1]
+            'ScanRequested': ['/Settings/ConextBridge/ScanRequested', 0, 0, 1],
+            'DriverStatus': ['/Settings/ConextBridge/DriverStatus', 0, 0, 1]
         }, eventCallback=self._handle_setting_changed)
 
         s.add_path("/Mgmt/ProcessName", __file__)
@@ -403,6 +407,12 @@ class ConextBridge:
         s.add_path("/FirmwareVersion", FIRMWARE_VERSION)
         s.add_path("/Serial", "CONEXT-BRIDGE-001")
         s.add_path("/Connected", 1)
+        
+        # Mandatory VE.Bus MK2 paths for valid parsing in Victron's C++ VeQItem and DeviceList GUI
+        s.add_path("/Interfaces/Mk2/Connection", CONNECTION)
+        s.add_path("/Interfaces/Mk2/ProductId", PRODUCT_ID)
+        s.add_path("/Interfaces/Mk2/ProductName", PRODUCT_NAME)
+        s.add_path("/Interfaces/Mk2/Version", FIRMWARE_VERSION)
         s.add_path("/Ac/ActiveIn/ActiveInput", 0, writeable=True)
         s.add_path("/Ac/ActiveIn/Connected", 1)
         s.add_path("/Ac/ActiveIn/CurrentLimitIsAdjustable", 1)
