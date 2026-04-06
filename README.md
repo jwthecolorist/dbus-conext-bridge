@@ -10,17 +10,20 @@ Venus OS driver that bridges Schneider Conext XW Pro inverters to the Victron DB
 - **Inverter controls** — Mode changes (On/Off/Charger/Inverter) written to Conext via Modbus
 - **AC input configuration** — Both AC inputs configurable as Grid/Generator/Shore in Venus Settings
 - **ESS compatible** — Hub4 paths for ESS systemcalc integration
+- **Auto-Scanner** — One-click Modbus network discovery tool built securely into the Venus UI
 
-## Quick Install
+## Zero-Touch SD / USB Installation (Recommended)
 
-```bash
-# Copy files to Venus device
-scp -r dbus-conext-bridge/ root@<venus-ip>:/tmp/
+The easiest way to install this driver is using a USB flash drive or SD card:
 
-# SSH into Venus and run installer
-ssh root@<venus-ip>
-sh /tmp/dbus-conext-bridge/install.sh
-```
+1. Download `venus-data.tar.gz` from the latest **[GitHub Release](https://github.com/jwthecolorist/dbus-conext-bridge/releases)**.
+2. Format a USB drive or MicroSD/SD card to **FAT32**.
+3. Copy the `venus-data.tar.gz` file directly to the root directory of the drive. *Do not extract it!*
+4. Insert the drive into your Cerbo GX (or other Venus device) and **reboot** the device.
+5. On boot, Venus OS will automatically detect the archive, extract the files to `/data/dbus-conext-bridge/`, and configure the services.
+6. Once fully booted, navigate to **Settings > Conext Bridge** on your GX screen to configure your gateway IP or run the Auto-Scanner.
+
+*Note for Firmware Updates:* This installation permanently registers itself in `rc.local`. If you update your Venus OS firmware in the future, the driver will automatically reinstall itself safely on the next boot.
 
 ## Configuration
 
