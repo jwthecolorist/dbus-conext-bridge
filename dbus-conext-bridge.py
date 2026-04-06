@@ -438,7 +438,6 @@ class ConextBridge:
         s.add_path("/CustomName", CUSTOM_NAME)
         s.add_path("/FirmwareVersion", FIRMWARE_VERSION)
         s.add_path("/Serial", "CONEXT-BRIDGE-001")
-        s.add_path("/NumberOfDevices", len(UNIT_IDS))
         for i, uid in enumerate(UNIT_IDS):
             s.add_path("/Devices/%d/Serial" % i, None)
             s.add_path("/Devices/%d/Phase" % i, 0)
