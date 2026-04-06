@@ -272,12 +272,18 @@ def fetch_static_info(client):
     if gw_ser: info['GatewaySerial'] = gw_ser
     if gw_fw: info['GatewayFirmware'] = gw_fw
     
-    # Fetch Master Inverter (UID 11 usually)
-    master_uid = UNIT_IDS[0] if UNIT_IDS else 11
-    inv_ser = _get_serial(master_uid, False)
-    inv_fw = _get_fw(master_uid, False)
-    if inv_ser: info['MasterSerial'] = inv_ser
-    if inv_fw: info['MasterFirmware'] = inv_fw
+    # Fetch Inverters
+    inverter_serials = {}
+    for uid in UNIT_IDS:
+        ser = _get_serial(uid, False)
+        if ser: inverter_serials[str(uid)] = ser
+        if len(UNIT_IDS) > 0 and uid == UNIT_IDS[0]:
+            if ser: info['MasterSerial'] = ser
+            fw = _get_fw(uid, False)
+            if fw: info['MasterFirmware'] = fw
+            
+    if inverter_serials:
+        info['InverterSerials'] = inverter_serials
         
     return info
 

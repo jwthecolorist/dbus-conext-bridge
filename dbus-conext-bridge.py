@@ -241,6 +241,11 @@ class ConextBridge:
                 fw = info.get("GatewayFirmware", info.get("MasterFirmware"))
                 if fw:
                     self._set("/FirmwareVersion", fw)
+                    
+                inv_serials = info.get("InverterSerials", {})
+                for i, uid in enumerate(UNIT_IDS):
+                    ser = inv_serials.get(str(uid))
+                    if ser: self._set("/Devices/%d/Serial" % i, ser)
 
             # Collect data from ALL inverter units
             all_units = [units.get(str(uid), {}) for uid in UNIT_IDS]
@@ -433,6 +438,11 @@ class ConextBridge:
         s.add_path("/CustomName", CUSTOM_NAME)
         s.add_path("/FirmwareVersion", FIRMWARE_VERSION)
         s.add_path("/Serial", "CONEXT-BRIDGE-001")
+        s.add_path("/NumberOfDevices", len(UNIT_IDS))
+        for i, uid in enumerate(UNIT_IDS):
+            s.add_path("/Devices/%d/Serial" % i, None)
+            s.add_path("/Devices/%d/Phase" % i, 0)
+            s.add_path("/Devices/%d/FirmwareVersion" % i, None)
         s.add_path("/Connected", 1)
         
         # Mandatory VE.Bus MK2 paths for valid parsing in Victron's C++ VeQItem and DeviceList GUI
