@@ -230,18 +230,6 @@ class ConextBridge:
             self._set("/Connected", 1)
             if self.settings['DriverStatus'] != 1: self.settings['DriverStatus'] = 1
 
-            # Update Metadata from Info dict if available
-            if info:
-                gw_serial = info.get("GatewaySerial")
-                if gw_serial:
-                    self._set("/Serial", gw_serial)
-                elif info.get("MasterSerial"):
-                    self._set("/Serial", info.get("MasterSerial"))
-                    
-                fw = info.get("GatewayFirmware", info.get("MasterFirmware"))
-                if fw:
-                    self._set("/FirmwareVersion", fw)
-
             # Collect data from ALL inverter units
             all_units = [units.get(str(uid), {}) for uid in UNIT_IDS]
 
@@ -430,9 +418,21 @@ class ConextBridge:
         s.add_path("/DeviceInstance", DEVICE_INSTANCE)
         s.add_path("/ProductId", PRODUCT_ID)
         s.add_path("/ProductName", PRODUCT_NAME)
+        # Attempt to inject physical serial numbers at boot (VRM routing breaks if changed later)
+        boot_serial = "CONEXT-BRIDGE-001"
+        boot_fw = FIRMWARE_VERSION
+        try:
+            with open("/tmp/conext_cache.json", "r") as f:
+                info = json.load(f).get("info", {})
+                gw = info.get("GatewaySerial", info.get("MasterSerial"))
+                if gw: boot_serial = gw
+                fw = info.get("GatewayFirmware", info.get("MasterFirmware"))
+                if fw: boot_fw = fw
+        except: pass
+        
         s.add_path("/CustomName", CUSTOM_NAME)
-        s.add_path("/FirmwareVersion", FIRMWARE_VERSION)
-        s.add_path("/Serial", "CONEXT-BRIDGE-001")
+        s.add_path("/FirmwareVersion", boot_fw)
+        s.add_path("/Serial", boot_serial)
         s.add_path("/Connected", 1)
         
         # Mandatory VE.Bus MK2 paths for valid parsing in Victron's C++ VeQItem and DeviceList GUI
