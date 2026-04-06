@@ -27,7 +27,11 @@ The easiest way to install this driver is using a USB flash drive or SD card:
 
 ## Configuration
 
-Edit `/data/dbus-conext-bridge/config.ini`:
+The easiest way to configure the system is directly through the **Venus OS UI** (`Settings > Conext Bridge`), which supports automatic device discovery. When you click **Apply Settings Now** in the GUI, it will safely restart the underlying services.
+
+### Manual Configuration (Advanced)
+
+You can manually edit `/data/dbus-conext-bridge/config.ini` if needed:
 
 ```ini
 [modbus]
@@ -40,8 +44,9 @@ unit_ids = 11,12
 poll_interval_ms = 3000
 ```
 
-Restart after config change:
+Restart services after a manual config change:
 ```bash
+svc -t /service/conext-poller
 svc -t /service/dbus-conext-bridge
 ```
 
