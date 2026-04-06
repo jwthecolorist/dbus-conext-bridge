@@ -1,11 +1,14 @@
-import QtQuick 1.1
+import QtQuick 2
 import com.victron.velib 1.0
 
 MbPage {
 title: qsTr("Conext Bridge Settings")
 property string settingsPrefix: "com.victronenergy.settings/Settings/ConextBridge"
 
-model: VisualItemModel {
+property VBusItem scanItem: VBusItem { bind: settingsPrefix + "/ScanRequested" }
+property VBusItem restartItem: VBusItem { bind: settingsPrefix + "/RestartRequested" }
+
+model: VisibleItemModel {
 MbItemRow {
 description: qsTr("Driver Status")
 value: statusItem.valid ? (statusItem.value === 1 ? qsTr("Connected") : qsTr("Offline")) : qsTr("Service Down")
@@ -68,10 +71,6 @@ scanItem.setValue(1)
 toast.createToast(qsTr("Scanning subnet (~10s)..."), 5000)
 }
 
-VBusItem {
-id: scanItem
-bind: settingsPrefix + "/ScanRequested"
-}
 }
 
 MbOK {
@@ -82,10 +81,6 @@ restartItem.setValue(1)
 toast.createToast(qsTr("Restarting Conext Bridge..."), 3000)
 }
 
-VBusItem {
-id: restartItem
-bind: settingsPrefix + "/RestartRequested"
-}
 }
 }
 }
