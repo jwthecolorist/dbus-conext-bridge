@@ -6,6 +6,16 @@ title: qsTr("Conext Bridge Settings")
 property string settingsPrefix: "com.victronenergy.settings/Settings/ConextBridge"
 
 model: VisibleItemModel {
+MbItemRow {
+description: qsTr("Driver Status")
+value: statusItem.valid ? (statusItem.value === 1 ? qsTr("Connected") : qsTr("Offline")) : qsTr("Service Down")
+
+VBusItem {
+id: statusItem
+bind: "com.victronenergy.vebus.conext_0/Connected"
+}
+}
+
 MbEditBoxIp {
 description: qsTr("Gateway IP")
 item.bind: settingsPrefix + "/GatewayIp"

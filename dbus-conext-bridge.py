@@ -24,6 +24,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 
 sys.path.insert(1, "/opt/victronenergy/dbus-systemcalc-py/ext/velib_python")
 from vedbus import VeDbusService
+from settingsdevice import SettingsDevice
 
 
 # --- Load config from config.ini ---
@@ -142,6 +143,33 @@ class ConextBridge:
     def _on_control_change(self, path, value):
         log.info("CONTROL %s -> %s (Venus-internal)", path, value)
         return True
+
+    def _handle_setting_changed(self, setting, oldvalue, newvalue):
+        if setting == 'RestartRequested' and newvalue == 1:
+            log.info("Settings restart requested by GUI. Updating config.ini...")
+            config = configparser.ConfigParser()
+            if os.path.exists(CFG_PATH): config.read(CFG_PATH)
+            
+            if not config.has_section("modbus"): config.add_section("modbus")
+            if not config.has_section("inverters"): config.add_section("inverters")
+            
+            config.set("modbus", "ip", str(self.settings['GatewayIp']))
+            config.set("modbus", "port", str(self.settings['GatewayPort']))
+            config.set("inverters", "unit_ids", str(self.settings['UnitIds']))
+            config.set("inverters", "count", str(self.settings['UnitCount']))
+            config.set("inverters", "poll_interval_ms", str(self.settings['PollInterval']))
+            
+            try:
+                with open(CFG_PATH, "w") as f:
+                    config.write(f)
+            except Exception as e:
+                log.error("Failed to save config.ini: %s", e)
+                
+            self.settings['RestartRequested'] = 0
+            
+            log.warning("Restarting Conext services to apply new settings...")
+            os.system("svc -t /service/conext-poller")
+            os.system("svc -t /service/dbus-conext-bridge")
 
     def _read_cache(self):
         """Read /tmp/conext_cache.json. Returns (units_dict, timestamp) or (None, 0)."""
@@ -343,6 +371,17 @@ class ConextBridge:
         s = VeDbusService("com.victronenergy.vebus.conext_0",
                           bus=dbus.SystemBus(), register=False)
         self.svc = s
+
+        # Initialize Settings Device (syncs from DBus to config.ini)
+        self.settings = SettingsDevice(dbus.SystemBus(), supportedSettings={
+            'GatewayIp': ['/Settings/ConextBridge/GatewayIp', '192.168.1.223', 0, 0],
+            'GatewayPort': ['/Settings/ConextBridge/GatewayPort', 503, 0, 65535],
+            'UnitIds': ['/Settings/ConextBridge/UnitIds', '11,12', 0, 0],
+            'UnitCount': ['/Settings/ConextBridge/UnitCount', 2, 0, 4],
+            'PollInterval': ['/Settings/ConextBridge/PollInterval', 3000, 1000, 30000],
+            'RestartRequested': ['/Settings/ConextBridge/RestartRequested', 0, 0, 1]
+        }, eventCallback=self._handle_setting_changed)
+
         s.add_path("/Mgmt/ProcessName", __file__)
         s.add_path("/Mgmt/ProcessVersion", "2.7.0")
         s.add_path("/Mgmt/Connection", CONNECTION)
