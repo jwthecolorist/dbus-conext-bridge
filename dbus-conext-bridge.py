@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 """
-dbus-conext-bridge v2.3 — Pure DBUS service for Conext XW Pro on Venus OS.
+dbus-conext-bridge v3.0 — Pure DBUS service for Conext XW Pro on Venus OS.
 
 Reads pre-cached Modbus data from /tmp/conext_cache.json (written by conext-poller).
 Does ZERO Modbus I/O — just reads a local JSON file (~1ms) and publishes to DBUS.
 This keeps the GLib main loop completely free for DBUS event processing.
 
 Architecture:
-  conext-poller (separate process) -> /tmp/conext_cache.json -> this script -> DBUS
+  conext-poller (separate daemontools service) -> /tmp/conext_cache.json -> this script -> DBUS
+
+v3.0 changes:
+  - Removed all subprocess/blocking calls (was causing GLib starvation)
+  - Delta-based DBUS updates (_set method) to avoid signal flooding
+  - Guarded formatters against None (prevents introspection crashes)
+  - SIGTERM handler for graceful DBUS shutdown
+  - Throttled logging (every 10th cycle instead of every cycle)
+  - /Connected toggle based on cache freshness
 """
-import sys, os, json, logging, time, configparser, subprocess
+import sys, os, json, logging, time, configparser, signal
 import dbus
 from gi.repository import GLib
 from dbus.mainloop.glib import DBusGMainLoop
@@ -19,9 +27,6 @@ from vedbus import VeDbusService
 
 
 # --- Load config from config.ini ---
-# The bridge does NOT read DBUS settings directly (to avoid subprocess calls
-# that crash on Venus). The poller reads DBUS settings and communicates
-# via /tmp/conext_cache.json. The bridge reads unit IDs from cache keys.
 CFG = configparser.ConfigParser()
 CFG_PATH = "/data/dbus-conext-bridge/config.ini"
 if os.path.exists(CFG_PATH):
@@ -29,8 +34,6 @@ if os.path.exists(CFG_PATH):
 
 _unit_ids = CFG.get("inverters", "unit_ids", fallback="11,12")
 UNIT_IDS = [int(x.strip()) for x in _unit_ids.split(",")]
-UNIT_L1 = UNIT_IDS[0]
-UNIT_L2 = UNIT_IDS[1] if len(UNIT_IDS) > 1 else UNIT_IDS[0]
 NUM_UNITS = CFG.getint("inverters", "count", fallback=len(UNIT_IDS))
 
 CONEXT_IP = CFG.get("modbus", "ip", fallback="192.168.1.223")
@@ -45,31 +48,63 @@ DEVICE_INSTANCE = CFG.getint("dbus", "device_instance", fallback=275)
 CONNECTION = "Modbus TCP %s:%d" % (CONEXT_IP, CONEXT_PORT)
 
 CACHE_PATH = "/tmp/conext_cache.json"
+WRITE_CMD_PATH = "/tmp/conext_write_cmd.json"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("conext-bridge")
 
-# --- Formatting callbacks ---
-def _a(p,v):  return "%.2fA"%v
-def _w(p,v):  return "%iW"%v
-def _va(p,v): return "%iVA"%v
-def _v(p,v):  return "%.1fV"%v
-def _hz(p,v): return "%.2fHz"%v
-def _c(p,v):  return "%i C"%v
-def _pct(p,v):return "%.1f%%"%v
+# --- Formatting callbacks (guarded against None to prevent introspection crashes) ---
+def _a(p,v):  return "%.2fA"%v if v is not None else "---"
+def _w(p,v):  return "%iW"%v if v is not None else "---"
+def _va(p,v): return "%iVA"%v if v is not None else "---"
+def _v(p,v):  return "%.1fV"%v if v is not None else "---"
+def _hz(p,v): return "%.2fHz"%v if v is not None else "---"
+def _c(p,v):  return "%i C"%v if v is not None else "---"
+def _pct(p,v):return "%.1f%%"%v if v is not None else "---"
+
+
+def _safe_add(*values):
+    """Sum values, treating None as 0. Returns None if ALL values are None."""
+    result = 0
+    all_none = True
+    for v in values:
+        if v is not None:
+            result += v
+            all_none = False
+    return None if all_none else result
+
+def _safe_avg(*values):
+    """Average values, ignoring None. Returns None if all None."""
+    valid = [v for v in values if v is not None]
+    if not valid:
+        return None
+    return sum(valid) / len(valid)
+
+def _safe_first(*values):
+    """Return first non-None value."""
+    for v in values:
+        if v is not None:
+            return v
+    return None
 
 
 class ConextBridge:
     def __init__(self):
         self.svc = None
-        self._poller_proc = None
+        self._mainloop = None
         self._cache_ts = 0
         self._stale_count = 0
         self._update_count = 0
-        # Settings fingerprint at startup — used to detect GUI changes
-        self._settings_fp = "%s:%d:%s" % (CONEXT_IP, CONEXT_PORT, ",".join(str(u) for u in UNIT_IDS))
+        self._last_values = {}  # Delta tracking: only update DBUS on value change
 
-    # --- Write callbacks (accepted on DBUS, no Modbus write from this process) ---
+    def _set(self, path, value):
+        """Update a DBUS path only if the value has changed. Avoids flooding
+        the GLib event loop with DBUS signal emissions on every cycle."""
+        if self._last_values.get(path) != value:
+            self.svc[path] = value
+            self._last_values[path] = value
+
+    # --- Write callbacks ---
     def _on_mode_change(self, path, value):
         modes = {1: 'Charger Only', 2: 'Inverter Only', 3: 'On', 4: 'Off'}
         if value not in modes:
@@ -78,9 +113,30 @@ class ConextBridge:
         return True
 
     def _on_current_limit_change(self, path, value):
-        per_unit = value / NUM_UNITS
-        log.warning("CONTROL %s -> %.1fA total (%.1fA per unit x%d)",
-                    path, value, per_unit, NUM_UNITS)
+        """Write AC input current limit back to Conext via command file."""
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            log.warning("CONTROL %s: invalid value %s", path, value)
+            return False
+        if value < 0 or value > 100:
+            log.warning("CONTROL %s: value %.1f out of range (0-100A)", path, value)
+            return False
+        # Determine which register to write
+        if "/In/1/" in path:
+            reg_name = "AC1BreakerSize"
+        elif "/In/2/" in path:
+            reg_name = "AC2BreakerSize"
+        else:
+            return False
+        # Write command file for poller to process
+        cmd = {"register": reg_name, "value": value, "unit_ids": UNIT_IDS}
+        try:
+            with open(WRITE_CMD_PATH, "w") as f:
+                json.dump(cmd, f)
+            log.warning("CONTROL %s -> %.1fA (write cmd sent to poller)", path, value)
+        except Exception as e:
+            log.error("CONTROL write cmd failed: %s", e)
         return True
 
     def _on_control_change(self, path, value):
@@ -101,12 +157,15 @@ class ConextBridge:
 
     def _update(self):
         """GLib timer: read JSON cache, publish to DBUS. ~1ms, zero blocking."""
+        if self.svc is None:
+            return True  # setup() failed, nothing to do
         try:
             units, ts = self._read_cache()
             if units is None:
                 self._stale_count += 1
                 if self._stale_count % 30 == 1:
                     log.warning("Cache not available (stale count: %d)", self._stale_count)
+                self._set("/Connected", 0)
                 return True
 
             # Check freshness (stale if >30s old)
@@ -115,109 +174,138 @@ class ConextBridge:
                 self._stale_count += 1
                 if self._stale_count % 30 == 1:
                     log.warning("Cache stale: %.0fs old (stale count: %d)", age, self._stale_count)
-                    # Try to restart poller
-                    self._ensure_poller()
+                self._set("/Connected", 0)
                 return True
 
             self._stale_count = 0
             self._cache_ts = ts
+            self._set("/Connected", 1)
 
-            l1 = units.get(str(UNIT_L1), {})
-            l2 = units.get(str(UNIT_L2), {})
-            s = self.svc
+            # Collect data from ALL inverter units
+            all_units = [units.get(str(uid), {}) for uid in UNIT_IDS]
 
-            # DC: average voltage, sum current/power
-            dcv1 = l1.get("DCVoltage") or 0
-            dcv2 = l2.get("DCVoltage") or 0
-            dc_voltage = (dcv1 + dcv2) / 2 if (dcv1 and dcv2) else (dcv1 or dcv2)
-            dc_current = (l1.get("DCCurrent") or 0) + (l2.get("DCCurrent") or 0)
-            dc_power = (l1.get("DCPower") or 0) + (l2.get("DCPower") or 0)
+            # === AC Input Current Limits (read from first unit — same for all) ===
+            u0 = all_units[0] if all_units else {}
+            ac1_limit = u0.get("AC1BreakerSize")
+            ac2_limit = u0.get("AC2BreakerSize")
+            if ac1_limit is not None:
+                self._set("/Ac/In/1/CurrentLimit", round(ac1_limit, 1))
+            if ac2_limit is not None:
+                self._set("/Ac/In/2/CurrentLimit", round(ac2_limit, 1))
 
-            s["/Dc/0/Voltage"] = round(dc_voltage, 2)
-            s["/Dc/0/Current"] = round(dc_current, 2)
-            s["/Dc/0/Power"] = round(dc_power)
-            s["/Dc/0/Temperature"] = None
+            # === DC: average voltage, sum current/power across all units ===
+            dc_voltages = [u.get("DCVoltage") for u in all_units]
+            dc_voltage = _safe_avg(*dc_voltages)
+            dc_current = _safe_add(*[u.get("DCCurrent") for u in all_units])
+            dc_power = _safe_add(*[u.get("DCPower") for u in all_units])
+
+            self._set("/Dc/0/Voltage", round(dc_voltage, 2) if dc_voltage is not None else None)
+            self._set("/Dc/0/Current", round(dc_current, 2) if dc_current is not None else None)
+            self._set("/Dc/0/Power", round(dc_power) if dc_power is not None else None)
+            self._set("/Dc/0/Temperature", None)
 
             # === AC Input 1 (Grid/Shore) ===
-            ac1_f1 = l1.get("AC1Frequency")
-            ac1_f2 = l2.get("AC1Frequency")
-            ac1_freq = ac1_f1 if ac1_f1 and ac1_f1 > 0 else ac1_f2
-            if ac1_freq and ac1_freq > 100: ac1_freq = None
-            ac1_connected = 1 if ac1_freq and ac1_freq > 45 else 0
+            ac1_freq = _safe_first(*[u.get("AC1Frequency") for u in all_units])
+            # Validate frequency (must be 45-65Hz to be "connected")
+            ac1_connected = 1 if ac1_freq and 45 < ac1_freq < 65 else 0
 
             # === AC Input 2 (Generator) ===
-            ac2_f1 = l1.get("AC2Frequency")
-            ac2_f2 = l2.get("AC2Frequency")
-            ac2_freq = ac2_f1 if ac2_f1 and ac2_f1 > 0 else ac2_f2
-            if ac2_freq and ac2_freq > 100: ac2_freq = None
-            ac2_connected = 1 if ac2_freq and ac2_freq > 45 else 0
+            ac2_freq = _safe_first(*[u.get("AC2Frequency") for u in all_units])
+            ac2_connected = 1 if ac2_freq and 45 < ac2_freq < 65 else 0
 
             if ac1_connected:
                 active_input, ac_connected = 0, 1
             elif ac2_connected:
                 active_input, ac_connected = 1, 1
             else:
-                active_input, ac_connected = 0, 0
+                active_input, ac_connected = 240, 0  # 240 = disconnected
+            self._set("/Ac/ActiveIn/ActiveInput", active_input)
+            self._set("/Ac/ActiveIn/Connected", ac_connected)
+            self._set("/Ac/NumberOfAcInputs", 2)
+            self._set("/Ac/State/AcIn1Available", ac1_connected)
+            self._set("/Ac/State/AcIn2Available", ac2_connected)
 
-            s["/Ac/ActiveIn/ActiveInput"] = active_input
-            s["/Ac/ActiveIn/Connected"] = ac_connected
-            s["/Ac/State/AcIn1Available"] = ac1_connected
-            s["/Ac/State/AcIn2Available"] = ac2_connected
-
-            if active_input == 0:
-                s["/Ac/ActiveIn/L1/F"] = ac1_freq
-                s["/Ac/ActiveIn/L1/V"] = l2.get("AC1L1Voltage") or l1.get("AC1L1Voltage")
-                ac_in_l1_i = (l1.get("AC1L1Current") or 0) + (l2.get("AC1L1Current") or 0)
-                s["/Ac/ActiveIn/L1/I"] = round(ac_in_l1_i, 2)
-                s["/Ac/ActiveIn/L1/P"] = round(ac_in_l1_i * (l2.get("AC1L1Voltage") or 120))
-                s["/Ac/ActiveIn/L2/F"] = ac1_freq
-                s["/Ac/ActiveIn/L2/V"] = l2.get("AC1L2Voltage") or l1.get("AC1L2Voltage")
-                s["/Ac/ActiveIn/L2/I"] = None
-                s["/Ac/ActiveIn/L2/P"] = None
-                ac_in_total = (l1.get("AC1Power") or 0) + (l2.get("AC1Power") or 0)
+            ac_in_total = 0  # Initialize before if/elif/else to prevent NameError
+            if active_input == 0 and ac1_connected:
+                # Grid/Shore connected
+                self._set("/Ac/ActiveIn/L1/F", ac1_freq)
+                ac_in_l1_v = _safe_first(*[u.get("AC1L1Voltage") for u in all_units])
+                ac_in_l2_v = _safe_first(*[u.get("AC1L2Voltage") for u in all_units])
+                ac_in_l1_i = _safe_add(*[u.get("AC1L1Current") for u in all_units])
+                self._set("/Ac/ActiveIn/L1/V", round(ac_in_l1_v, 1) if ac_in_l1_v else None)
+                self._set("/Ac/ActiveIn/L1/I", round(ac_in_l1_i, 2) if ac_in_l1_i else None)
+                self._set("/Ac/ActiveIn/L2/F", ac1_freq)
+                self._set("/Ac/ActiveIn/L2/V", round(ac_in_l2_v, 1) if ac_in_l2_v else None)
+                self._set("/Ac/ActiveIn/L2/I", None)  # L2 current not in register map
+                ac_in_total = _safe_add(*[u.get("AC1Power") for u in all_units])
+                # Approximate L1/L2 power from total (even split for split-phase)
+                if ac_in_total is not None:
+                    self._set("/Ac/ActiveIn/L1/P", round(ac_in_total / 2))
+                    self._set("/Ac/ActiveIn/L2/P", round(ac_in_total / 2))
+                else:
+                    self._set("/Ac/ActiveIn/L1/P", None)
+                    self._set("/Ac/ActiveIn/L2/P", None)
+            elif active_input == 1 and ac2_connected:
+                # Generator connected
+                self._set("/Ac/ActiveIn/L1/F", ac2_freq)
+                ac_in_l1_v = _safe_first(*[u.get("AC2L1Voltage") for u in all_units])
+                ac_in_l1_i = _safe_add(*[u.get("AC2L1Current") for u in all_units])
+                self._set("/Ac/ActiveIn/L1/V", round(ac_in_l1_v, 1) if ac_in_l1_v else None)
+                self._set("/Ac/ActiveIn/L1/I", round(ac_in_l1_i, 2) if ac_in_l1_i else None)
+                self._set("/Ac/ActiveIn/L2/F", ac2_freq)
+                self._set("/Ac/ActiveIn/L2/V", None)
+                self._set("/Ac/ActiveIn/L2/I", None)
+                ac_in_total = _safe_add(*[u.get("AC2Power") for u in all_units])
+                self._set("/Ac/ActiveIn/L1/P", round(ac_in_total / 2) if ac_in_total else None)
+                self._set("/Ac/ActiveIn/L2/P", round(ac_in_total / 2) if ac_in_total else None)
             else:
-                s["/Ac/ActiveIn/L1/F"] = ac2_freq
-                s["/Ac/ActiveIn/L1/V"] = l2.get("AC2L1Voltage") or l1.get("AC2L1Voltage")
-                ac_in_l1_i = (l1.get("AC2L1Current") or 0) + (l2.get("AC2L1Current") or 0)
-                s["/Ac/ActiveIn/L1/I"] = round(ac_in_l1_i, 2)
-                s["/Ac/ActiveIn/L1/P"] = round(ac_in_l1_i * (l2.get("AC2L1Voltage") or 120))
-                s["/Ac/ActiveIn/L2/F"] = ac2_freq
-                s["/Ac/ActiveIn/L2/V"] = None
-                s["/Ac/ActiveIn/L2/I"] = None
-                s["/Ac/ActiveIn/L2/P"] = None
-                ac_in_total = (l1.get("AC2Power") or 0) + (l2.get("AC2Power") or 0)
-            s["/Ac/ActiveIn/P"] = round(ac_in_total)
+                # No AC input
+                for leg in ["L1", "L2"]:
+                    self._set("/Ac/ActiveIn/%s/F" % leg, None)
+                    self._set("/Ac/ActiveIn/%s/V" % leg, None)
+                    self._set("/Ac/ActiveIn/%s/I" % leg, None)
+                    self._set("/Ac/ActiveIn/%s/P" % leg, None)
+                ac_in_total = 0
+            self._set("/Ac/ActiveIn/P", round(ac_in_total) if ac_in_total else 0)
 
-            # === AC Output (Load) ===
-            lf1 = l1.get("ACLoadFrequency")
-            lf2 = l2.get("ACLoadFrequency")
-            load_freq = lf1 if lf1 and lf1 > 0 else lf2
+            # === AC Output (Load) — sum across inverters, per-leg ===
+            load_freq = _safe_first(*[u.get("ACLoadFrequency") for u in all_units])
 
-            s["/Ac/Out/L1/F"] = load_freq
-            s["/Ac/Out/L1/V"] = l2.get("ACLoadL1Voltage") or l1.get("ACLoadL1Voltage")
-            total_l1_i = (l1.get("ACLoadL1Current") or 0) + (l2.get("ACLoadL1Current") or 0)
-            s["/Ac/Out/L1/I"] = round(total_l1_i, 2)
+            # L1 Load: sum current across all inverters, use first available voltage
+            load_l1_v = _safe_first(*[u.get("ACLoadL1Voltage") for u in all_units])
+            load_l1_i = _safe_add(*[u.get("ACLoadL1Current") for u in all_units])
 
-            s["/Ac/Out/L2/F"] = load_freq
-            s["/Ac/Out/L2/V"] = l2.get("ACLoadL2Voltage") or l1.get("ACLoadL2Voltage")
-            total_l2_i = (l1.get("ACLoadL2Current") or 0) + (l2.get("ACLoadL2Current") or 0)
-            s["/Ac/Out/L2/I"] = round(total_l2_i, 2)
+            # L2 Load: same
+            load_l2_v = _safe_first(*[u.get("ACLoadL2Voltage") for u in all_units])
+            load_l2_i = _safe_add(*[u.get("ACLoadL2Current") for u in all_units])
 
-            load_total = (l1.get("ACLoadPower") or 0) + (l2.get("ACLoadPower") or 0)
-            s["/Ac/Out/P"] = round(load_total)
+            self._set("/Ac/Out/L1/F", load_freq)
+            self._set("/Ac/Out/L1/V", round(load_l1_v, 1) if load_l1_v is not None else None)
+            self._set("/Ac/Out/L1/I", round(load_l1_i, 2) if load_l1_i is not None else None)
 
-            total_i = total_l1_i + total_l2_i
-            if total_i > 0:
-                s["/Ac/Out/L1/P"] = round(load_total * total_l1_i / total_i)
-                s["/Ac/Out/L2/P"] = round(load_total * total_l2_i / total_i)
+            self._set("/Ac/Out/L2/F", load_freq)
+            self._set("/Ac/Out/L2/V", round(load_l2_v, 1) if load_l2_v is not None else None)
+            self._set("/Ac/Out/L2/I", round(load_l2_i, 2) if load_l2_i is not None else None)
+
+            # Total load power = sum from all inverters
+            load_total = _safe_add(*[u.get("ACLoadPower") for u in all_units])
+            self._set("/Ac/Out/P", round(load_total) if load_total is not None else None)
+
+            # Per-leg power: proportional split based on current
+            total_i = (load_l1_i or 0) + (load_l2_i or 0)
+            if load_total is not None and total_i > 0:
+                self._set("/Ac/Out/L1/P", round(load_total * (load_l1_i or 0) / total_i))
+                self._set("/Ac/Out/L2/P", round(load_total * (load_l2_i or 0) / total_i))
             else:
-                s["/Ac/Out/L1/P"] = 0
-                s["/Ac/Out/L2/P"] = 0
+                self._set("/Ac/Out/L1/P", round(load_total / 2) if load_total else 0)
+                self._set("/Ac/Out/L2/P", round(load_total / 2) if load_total else 0)
 
             # === State ===
-            ds = l1.get("DeviceState")
-            ie = l1.get("InverterEnabled")
-            ce = l1.get("ChargerEnabled")
+            # Use first unit's state (all units should be in the same state)
+            u0 = all_units[0] if all_units else {}
+            ds = u0.get("DeviceState")
+            ie = u0.get("InverterEnabled")
+            ce = u0.get("ChargerEnabled")
             if ds is None or ds < 2:
                 venus_state = 0
             elif ds == 2:
@@ -226,96 +314,37 @@ class ConextBridge:
                 venus_state = 8 if ac_connected else 9
             else:
                 venus_state = 0
-            s["/State"] = venus_state
+            self._set("/State", venus_state)
 
             mode = 3
             if ie == 0 and ce == 0: mode = 4
             elif ie == 0 and ce == 1: mode = 1
             elif ie == 1 and ce == 0: mode = 2
-            s["/Mode"] = mode
-            s["/VebusChargeState"] = 0
+            self._set("/Mode", mode)
+            self._set("/VebusChargeState", 0)
 
-            s["/Alarms/GridLost"] = 0
+            self._set("/Alarms/GridLost", 0)
 
-            log.info("L1[%d]:%.1fV %dW ld:%dW | L2[%d]:%.1fV %dW ld:%dW | DC:%dW Ld:%dW (age:%.1fs)",
-                     UNIT_L1, dcv1, l1.get("DCPower",0) or 0, l1.get("ACLoadPower",0) or 0,
-                     UNIT_L2, dcv2, l2.get("DCPower",0) or 0, l2.get("ACLoadPower",0) or 0,
-                     dc_power, load_total, age)
-
-            # Check for settings changes every ~30s (10 cycles * 3s)
             self._update_count += 1
-            if self._update_count % 10 == 0:
-                self._check_settings_change(units)
 
-            # Check for immediate restart request from GUI Apply button
-            self._check_restart_requested()
+            # Log summary every 10th cycle (~30s) to avoid log spam
+            if self._update_count % 10 == 1:
+                log.info("DC:%.1fV %.1fA %dW | Ld:L1=%.0fV/%.1fA L2=%.0fV/%.1fA %dW | st:%d (age:%.1fs) [#%d]",
+                         dc_voltage or 0, dc_current or 0, dc_power or 0,
+                         load_l1_v or 0, load_l1_i or 0, load_l2_v or 0, load_l2_i or 0,
+                         load_total or 0, venus_state, age, self._update_count)
 
         except Exception as e:
-            log.warning("DBUS update error: %s", e)
+            log.warning("DBUS update error: %s", e, exc_info=True)
         return True
 
-    def _check_restart_requested(self):
-        """Check if GUI Apply button was pressed (RestartRequested=1). Restart if so."""
-        try:
-            r = subprocess.run(
-                ["dbus", "-y", "com.victronenergy.settings",
-                 "/Settings/ConextBridge/RestartRequested", "GetValue"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1)
-            if r.returncode == 0:
-                val = r.stdout.decode().strip()
-                if val == "1" or val == "'1'":
-                    log.warning("Apply button pressed! Restarting service...")
-                    # Reset the flag first
-                    subprocess.run(
-                        ["dbus", "-y", "com.victronenergy.settings",
-                         "/Settings/ConextBridge/RestartRequested", "SetValue", "0"],
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1)
-                    os.system("svc -t /service/dbus-conext-bridge &")
-        except Exception:
-            pass  # Non-critical
-
-    def _check_settings_change(self, cache_data):
-        """Check if GX UI settings changed. If so, restart service to apply."""
-        try:
-            with open(CACHE_PATH, "r") as f:
-                data = json.load(f)
-            settings = data.get("settings", {})
-            if not settings:
-                return
-            new_fp = "%s:%s:%s" % (
-                settings.get("ip", ""),
-                settings.get("port", ""),
-                settings.get("unit_ids", ""))
-            if new_fp != self._settings_fp and new_fp != "::":
-                log.warning("Settings changed! '%s' -> '%s'. Restarting service...",
-                            self._settings_fp, new_fp)
-                os.system("svc -t /service/dbus-conext-bridge &")
-        except Exception:
-            pass  # Non-critical — don't crash on settings check
-
-    def _ensure_poller(self):
-        """Start or restart the poller subprocess if it's not running."""
-        if self._poller_proc and self._poller_proc.poll() is None:
-            return  # still running
-        poller_path = os.path.join(os.path.dirname(__file__), "conext-poller.py")
-        if not os.path.exists(poller_path):
-            poller_path = "/data/dbus-conext-bridge/conext-poller.py"
-        try:
-            self._poller_proc = subprocess.Popen(
-                [sys.executable, poller_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            log.info("Started poller subprocess (pid %d)", self._poller_proc.pid)
-        except Exception as e:
-            log.error("Failed to start poller: %s", e)
 
     def setup(self):
         s = VeDbusService("com.victronenergy.vebus.conext_0",
                           bus=dbus.SystemBus(), register=False)
         self.svc = s
         s.add_path("/Mgmt/ProcessName", __file__)
-        s.add_path("/Mgmt/ProcessVersion", "2.3.0")
+        s.add_path("/Mgmt/ProcessVersion", "2.7.0")
         s.add_path("/Mgmt/Connection", CONNECTION)
         s.add_path("/DeviceInstance", DEVICE_INSTANCE)
         s.add_path("/ProductId", PRODUCT_ID)
@@ -377,7 +406,7 @@ class ConextBridge:
         s.add_path("/Dc/0/Power", None, gettextcallback=_w)
         s.add_path("/Dc/0/Temperature", None, gettextcallback=_c)
         s.add_path("/Dc/0/Voltage", None, gettextcallback=_v)
-        s.add_path("/Devices/NumberOfMultis", 2)
+        s.add_path("/Devices/NumberOfMultis", NUM_UNITS)
         for ep in ["AcIn1ToAcOut", "AcIn1ToInverter", "AcIn2ToAcOut",
                     "AcIn2ToInverter", "AcOutToAcIn1", "AcOutToAcIn2",
                     "InverterToAcIn1", "InverterToAcIn2", "InverterToAcOut",
@@ -413,16 +442,23 @@ class ConextBridge:
         s.add_path("/VebusError", 0)
         s.add_path("/Soc", None, gettextcallback=_pct)
         s.register()
-        log.info("DBUS service registered (v2.3 — separate process, JSON cache)")
+        log.info("DBUS service registered (v2.7 — sentinel filtering, proper L1/L2)")
+
+    def _on_sigterm(self, signum, frame):
+        """Graceful shutdown: unregister DBUS name before exit."""
+        log.info("SIGTERM received — shutting down gracefully")
+        if self._mainloop:
+            self._mainloop.quit()
 
     def run(self):
         DBusGMainLoop(set_as_default=True)
+        signal.signal(signal.SIGTERM, self._on_sigterm)
         self.setup()
-        self._ensure_poller()
-        # Read cache every 1s, publish to DBUS. ~1ms per call, zero blocking.
-        GLib.timeout_add(1000, self._update)
-        log.info("Bridge v2.3: DBUS-only process, poller runs separately")
-        GLib.MainLoop().run()
+        GLib.timeout_add(3000, self._update)
+        log.info("Bridge v3.0: DBUS service started (poller is separate daemontools service)")
+        self._mainloop = GLib.MainLoop()
+        self._mainloop.run()
+        log.info("Bridge v3.0: shutdown complete")
 
 if __name__ == "__main__":
     ConextBridge().run()

@@ -1,0 +1,4 @@
+#!/bin/sh
+exec 2>&1
+sleep 3
+exec python3 -u /data/dbus-conext-bridge/conext-poller.py
