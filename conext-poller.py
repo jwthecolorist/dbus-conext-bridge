@@ -223,11 +223,12 @@ def poll_unit(client, uid):
     return d
 
 
-def write_cache(units):
+def write_cache(units, static_info=None):
     """Atomic write: write to tmp file, then rename."""
     data = {
         "ts": time.time(),
         "units": units,
+        "info": static_info or {},
         "settings": {
             "ip": CONEXT_IP,
             "port": CONEXT_PORT,
@@ -241,6 +242,44 @@ def write_cache(units):
         os.rename(CACHE_TMP, CACHE_PATH)
     except Exception as e:
         log.error("Cache write failed: %s", e)
+
+def fetch_static_info(client):
+    """Fetch Hardware Serial Numbers and Firmware strings explicitly at startup."""
+    info = {}
+    
+    # Gateway is typically UID 1, Master Inverter is UNIT_IDS[0]
+    
+    def _get_serial(uid, is_gw):
+        try:
+            count = 8 if is_gw else 16
+            raw = client.read(uid, 43, count)
+            return raw.decode('utf-8', errors='ignore').replace('\x00', '').strip()
+        except: return None
+        
+    def _get_fw(uid, is_gw):
+        try:
+            if is_gw:
+                raw = client.read(uid, 30, 10)
+                return raw.decode('utf-8', errors='ignore').replace('\x00', '').strip()
+            else:
+                raw = client.read(uid, 30, 2)
+                return str(struct.unpack('>I', raw)[0])
+        except: return None
+
+    # Fetch Gateway (UID 1)
+    gw_ser = _get_serial(1, True)
+    gw_fw = _get_fw(1, True)
+    if gw_ser: info['GatewaySerial'] = gw_ser
+    if gw_fw: info['GatewayFirmware'] = gw_fw
+    
+    # Fetch Master Inverter (UID 11 usually)
+    master_uid = UNIT_IDS[0] if UNIT_IDS else 11
+    inv_ser = _get_serial(master_uid, False)
+    inv_fw = _get_fw(master_uid, False)
+    if inv_ser: info['MasterSerial'] = inv_ser
+    if inv_fw: info['MasterFirmware'] = inv_fw
+        
+    return info
 
 
 # --- Writable registers: name -> (reg, scale) ---
@@ -296,7 +335,8 @@ def main():
     errors = 0
     poll_count = 0
     retry_delay = 5  # Exponential backoff: 5, 10, 20, 40, 60 max
-    log.info("Poller v3.0 starting: units=%s ip=%s:%d interval=%.1fs",
+    static_info = {}
+    log.info("Poller v3.1 starting: units=%s ip=%s:%d interval=%.1fs",
              UNIT_IDS, CONEXT_IP, CONEXT_PORT, POLL_INTERVAL)
 
     while True:
@@ -306,6 +346,8 @@ def main():
                     connected = True
                     errors = 0
                     retry_delay = 5  # Reset backoff on success
+                    static_info = fetch_static_info(client)
+                    log.info("Loaded static metadata: %s", static_info)
                 else:
                     log.warning("Retry in %ds...", retry_delay)
                     time.sleep(retry_delay)
@@ -316,7 +358,7 @@ def main():
             for uid in UNIT_IDS:
                 units[str(uid)] = poll_unit(client, uid)
 
-            write_cache(units)
+            write_cache(units, static_info)
             process_write_commands(client)
             errors = 0
             poll_count += 1

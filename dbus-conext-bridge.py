@@ -190,23 +190,23 @@ class ConextBridge:
             self.settings['ScanRequested'] = 0
 
     def _read_cache(self):
-        """Read /tmp/conext_cache.json. Returns (units_dict, timestamp) or (None, 0)."""
+        """Read /tmp/conext_cache.json. Returns (units, ts, info)."""
         try:
             with open(CACHE_PATH, "r") as f:
                 data = json.load(f)
-            return data.get("units", {}), data.get("ts", 0)
+            return data.get("units", {}), data.get("ts", 0), data.get("info", {})
         except (FileNotFoundError, json.JSONDecodeError):
-            return None, 0
+            return None, 0, {}
         except Exception as e:
             log.warning("Cache read error: %s", e)
-            return None, 0
+            return None, 0, {}
 
     def _update(self):
         """GLib timer: read JSON cache, publish to DBUS. ~1ms, zero blocking."""
         if self.svc is None:
             return True  # setup() failed, nothing to do
         try:
-            units, ts = self._read_cache()
+            units, ts, info = self._read_cache()
             if units is None:
                 self._stale_count += 1
                 if self._stale_count % 30 == 1:
@@ -229,6 +229,18 @@ class ConextBridge:
             self._cache_ts = ts
             self._set("/Connected", 1)
             if self.settings['DriverStatus'] != 1: self.settings['DriverStatus'] = 1
+
+            # Update Metadata from Info dict if available
+            if info:
+                gw_serial = info.get("GatewaySerial")
+                if gw_serial:
+                    self._set("/Serial", gw_serial)
+                elif info.get("MasterSerial"):
+                    self._set("/Serial", info.get("MasterSerial"))
+                    
+                fw = info.get("GatewayFirmware", info.get("MasterFirmware"))
+                if fw:
+                    self._set("/FirmwareVersion", fw)
 
             # Collect data from ALL inverter units
             all_units = [units.get(str(uid), {}) for uid in UNIT_IDS]
