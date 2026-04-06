@@ -201,7 +201,8 @@ def poll_unit(client, uid):
             d[name] = read_reg(client, uid, name)
             if INTER_READ_DELAY > 0:
                 time.sleep(INTER_READ_DELAY)
-        except Exception:
+        except Exception as e:
+            log.debug("UID%d read %s failed: %s", uid, name, e)
             d[name] = None
 
     # Port-level invalidation: if a port frequency is None (sentinel),
