@@ -1,11 +1,11 @@
-import QtQuick 2
+import QtQuick 1.1
 import com.victron.velib 1.0
 
 MbPage {
 title: qsTr("Conext Bridge Settings")
 property string settingsPrefix: "com.victronenergy.settings/Settings/ConextBridge"
 
-model: VisibleItemModel {
+model: VisualItemModel {
 MbItemRow {
 description: qsTr("Driver Status")
 value: statusItem.valid ? (statusItem.value === 1 ? qsTr("Connected") : qsTr("Offline")) : qsTr("Service Down")

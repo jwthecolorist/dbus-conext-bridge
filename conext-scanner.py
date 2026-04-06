@@ -2,7 +2,7 @@
 """
 conext-scanner.py
 Automatically finds a Conext Gateway on the local subnet via port 503,
-enumerates active Unit IDs (1-30), and updates Venus OS DBus settings.
+enumerates active Unit IDs (1-20), and updates Venus OS DBus settings.
 """
 import socket
 import struct
@@ -92,11 +92,11 @@ def main():
     main_ip = gateways[0]
     print(f"Gateway found at: {main_ip}")
     
-    print("Enumerating Unit IDs (1-30)...")
+    print("Enumerating Unit IDs (1-20)...")
     active_uids = []
     
     # Conext gateways are slow, sequential querying is safer than concurrent for Modbus
-    for uid in range(1, 31):
+    for uid in range(1, 21):
         if check_modbus_uid(main_ip, uid):
             print(f"  Found device at UID {uid}")
             active_uids.append(uid)
