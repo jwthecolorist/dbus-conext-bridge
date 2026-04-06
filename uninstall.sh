@@ -10,12 +10,20 @@ SERVICE_DIR="/service/dbus-conext-bridge"
 
 echo "=== dbus-conext-bridge uninstaller ==="
 
-# Stop the service
+# Stop the service and firmly kill any lingering python processes
 if [ -L "$SERVICE_DIR" ]; then
     svc -d "$SERVICE_DIR" 2>/dev/null || true
     sleep 2
     rm -f "$SERVICE_DIR"
     echo "  Service stopped and unregistered"
+fi
+pkill -f dbus-conext-bridge.py || true
+pkill -f conext-poller.py || true
+
+# Remove startup hook
+if [ -f "/data/rc.local" ]; then
+    sed -i '/dbus-conext-bridge/d' /data/rc.local
+    echo "  Removed rc.local hook"
 fi
 
 # Remove installation
