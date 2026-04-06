@@ -61,6 +61,20 @@ decimals: 0
 }
 
 MbOK {
+description: qsTr("Auto-Discover Network")
+value: qsTr("Starts Modbus scan")
+onClicked: {
+scanItem.setValue(1)
+toast.createToast(qsTr("Scanning subnet (~10s)..."), 5000)
+}
+
+VBusItem {
+id: scanItem
+bind: settingsPrefix + "/ScanRequested"
+}
+}
+
+MbOK {
 description: qsTr("Apply Settings Now")
 value: qsTr("Press to restart bridge")
 onClicked: {

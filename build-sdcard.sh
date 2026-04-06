@@ -24,6 +24,7 @@ mkdir -p "$BUILD_DIR/dbus-conext-bridge/gui"
 # Copy driver files
 cp "$SCRIPT_DIR/dbus-conext-bridge.py" "$BUILD_DIR/dbus-conext-bridge/"
 cp "$SCRIPT_DIR/conext-poller.py" "$BUILD_DIR/dbus-conext-bridge/"
+cp "$SCRIPT_DIR/conext-scanner.py" "$BUILD_DIR/dbus-conext-bridge/"
 cp "$SCRIPT_DIR/config.default.ini" "$BUILD_DIR/dbus-conext-bridge/config.ini"
 cp "$SCRIPT_DIR/gui/PageSettingsConextBridge.qml" "$BUILD_DIR/dbus-conext-bridge/gui/"
 
@@ -105,6 +106,7 @@ cd "$BUILD_DIR"
 tar czf "$OUT_FILE" \
     dbus-conext-bridge/dbus-conext-bridge.py \
     dbus-conext-bridge/conext-poller.py \
+    dbus-conext-bridge/conext-scanner.py \
     dbus-conext-bridge/config.ini \
     dbus-conext-bridge/gui/PageSettingsConextBridge.qml \
     dbus-conext-bridge/service/run \

@@ -171,6 +171,16 @@ class ConextBridge:
             os.system("svc -t /service/conext-poller")
             os.system("svc -t /service/dbus-conext-bridge")
 
+        elif setting == 'ScanRequested' and newvalue == 1:
+            log.info("Auto-Scan requested by GUI. Running conext-scanner.py...")
+            # Run scanner script asynchronously to avoid blocking the DBus GLib thread
+            import subprocess
+            subprocess.Popen(["python3", "/data/dbus-conext-bridge/conext-scanner.py"])
+            
+            # The python script writes directly to DBus, which will trigger our other setting callbacks.
+            # But the scanner takes ~10 seconds. We just reset the GUI flag.
+            self.settings['ScanRequested'] = 0
+
     def _read_cache(self):
         """Read /tmp/conext_cache.json. Returns (units_dict, timestamp) or (None, 0)."""
         try:
@@ -379,7 +389,8 @@ class ConextBridge:
             'UnitIds': ['/Settings/ConextBridge/UnitIds', '11,12', 0, 0],
             'UnitCount': ['/Settings/ConextBridge/UnitCount', 2, 0, 4],
             'PollInterval': ['/Settings/ConextBridge/PollInterval', 3000, 1000, 30000],
-            'RestartRequested': ['/Settings/ConextBridge/RestartRequested', 0, 0, 1]
+            'RestartRequested': ['/Settings/ConextBridge/RestartRequested', 0, 0, 1],
+            'ScanRequested': ['/Settings/ConextBridge/ScanRequested', 0, 0, 1]
         }, eventCallback=self._handle_setting_changed)
 
         s.add_path("/Mgmt/ProcessName", __file__)
