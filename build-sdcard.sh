@@ -18,6 +18,7 @@ OUT_FILE="$SCRIPT_DIR/venus-data.tar.gz"
 echo "Building venus-data.tar.gz..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/dbus-conext-bridge/service/log"
+mkdir -p "$BUILD_DIR/dbus-conext-bridge/poller-service/log"
 mkdir -p "$BUILD_DIR/dbus-conext-bridge/gui"
 
 # Copy driver files
@@ -29,8 +30,12 @@ cp "$SCRIPT_DIR/gui/PageSettingsConextBridge.qml" "$BUILD_DIR/dbus-conext-bridge
 # Copy service/run scripts
 cp "$SCRIPT_DIR/service/run" "$BUILD_DIR/dbus-conext-bridge/service/run"
 cp "$SCRIPT_DIR/service/log/run" "$BUILD_DIR/dbus-conext-bridge/service/log/run"
+cp "$SCRIPT_DIR/poller-service/run" "$BUILD_DIR/dbus-conext-bridge/poller-service/run"
+cp "$SCRIPT_DIR/poller-service/log/run" "$BUILD_DIR/dbus-conext-bridge/poller-service/log/run"
 chmod +x "$BUILD_DIR/dbus-conext-bridge/service/run"
 chmod +x "$BUILD_DIR/dbus-conext-bridge/service/log/run"
+chmod +x "$BUILD_DIR/dbus-conext-bridge/poller-service/run"
+chmod +x "$BUILD_DIR/dbus-conext-bridge/poller-service/log/run"
 
 # Create the boot-time setup script (self-registers in rc.local)
 cat > "$BUILD_DIR/dbus-conext-bridge/setup.sh" << 'SETUP'
@@ -60,7 +65,11 @@ fi
 # 1. Service symlink (/service is tmpfs, recreated each boot)
 if [ ! -L /service/dbus-conext-bridge ]; then
     ln -sf "$INSTALL_DIR/service" /service/dbus-conext-bridge
-    logger "conext-bridge: Service linked"
+    logger "conext-bridge: Bridge Service linked"
+fi
+if [ ! -L /service/conext-poller ]; then
+    ln -sf "$INSTALL_DIR/poller-service" /service/conext-poller
+    logger "conext-bridge: Poller Service linked"
 fi
 
 # 2. Register DBUS settings (safe to re-run, won't overwrite existing values)
@@ -100,6 +109,8 @@ tar czf "$OUT_FILE" \
     dbus-conext-bridge/gui/PageSettingsConextBridge.qml \
     dbus-conext-bridge/service/run \
     dbus-conext-bridge/service/log/run \
+    dbus-conext-bridge/poller-service/run \
+    dbus-conext-bridge/poller-service/log/run \
     dbus-conext-bridge/setup.sh
 
 echo ""
