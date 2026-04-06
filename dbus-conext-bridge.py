@@ -128,6 +128,14 @@ class ConextBridge:
             reg_name = "AC1BreakerSize"
         elif "/In/2/" in path:
             reg_name = "AC2BreakerSize"
+        elif "/Ac/ActiveIn/CurrentLimit" == path:
+            active = self.svc["/Ac/ActiveIn/ActiveInput"]
+            if active == 0 or active == 240:
+                reg_name = "AC1BreakerSize"
+            elif active == 1:
+                reg_name = "AC2BreakerSize"
+            else:
+                return False
         else:
             return False
         # Write command file for poller to process
@@ -262,6 +270,13 @@ class ConextBridge:
                 active_input, ac_connected = 240, 0  # 240 = disconnected
             self._set("/Ac/ActiveIn/ActiveInput", active_input)
             self._set("/Ac/ActiveIn/Connected", ac_connected)
+            
+            # Mirror Active Input Limit for GUI display
+            if active_input == 0 or active_input == 240:
+                self._set("/Ac/ActiveIn/CurrentLimit", round(ac1_limit, 1) if ac1_limit is not None else None)
+            elif active_input == 1:
+                self._set("/Ac/ActiveIn/CurrentLimit", round(ac2_limit, 1) if ac2_limit is not None else None)
+                
             self._set("/Ac/NumberOfAcInputs", 2)
             self._set("/Ac/State/AcIn1Available", ac1_connected)
             self._set("/Ac/State/AcIn2Available", ac2_connected)
@@ -415,6 +430,8 @@ class ConextBridge:
         s.add_path("/Interfaces/Mk2/Version", FIRMWARE_VERSION)
         s.add_path("/Ac/ActiveIn/ActiveInput", 0, writeable=True)
         s.add_path("/Ac/ActiveIn/Connected", 1)
+        s.add_path("/Ac/ActiveIn/CurrentLimit", 50.0, gettextcallback=_a, writeable=True,
+                   onchangecallback=self._on_current_limit_change)
         s.add_path("/Ac/ActiveIn/CurrentLimitIsAdjustable", 1)
         for ph in ["L1", "L2"]:
             s.add_path("/Ac/ActiveIn/%s/F" % ph, None, gettextcallback=_hz)
