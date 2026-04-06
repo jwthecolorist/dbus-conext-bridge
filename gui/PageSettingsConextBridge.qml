@@ -7,16 +7,13 @@ property string settingsPrefix: "com.victronenergy.settings/Settings/ConextBridg
 
 property VBusItem scanItem: VBusItem { bind: settingsPrefix + "/ScanRequested" }
 property VBusItem restartItem: VBusItem { bind: settingsPrefix + "/RestartRequested" }
+property VBusItem statusItem: VBusItem { bind: "com.victronenergy.vebus.conext_0/Connected" }
 
 model: VisibleItemModel {
-MbItemRow {
+MbItemValue {
 description: qsTr("Driver Status")
 value: statusItem.valid ? (statusItem.value === 1 ? qsTr("Connected") : qsTr("Offline")) : qsTr("Service Down")
 
-VBusItem {
-id: statusItem
-bind: "com.victronenergy.vebus.conext_0/Connected"
-}
 }
 
 MbEditBoxIp {
