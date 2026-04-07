@@ -547,13 +547,14 @@ class ConextBridge:
 if __name__ == "__main__":
     try:
         ConextBridge().run()
-    except dbus.exceptions.NameExistsException:
-        log.warning("DBus name com.victronenergy.vebus.conext_0 already exists! dbus-daemon is still releasing the old connection. Backing off for 3 seconds...")
-        import time
-        time.sleep(3)
-        sys.exit(1)
     except Exception as e:
-        log.critical("Bridge crashed: %s", e, exc_info=True)
-        import time
-        time.sleep(1)
-        sys.exit(1)
+        if "NameExistsException" in str(type(e)):
+            log.warning("DBus name already exists! dbus-daemon is still releasing the old connection. Backing off for 3 seconds...")
+            import time
+            time.sleep(3)
+            sys.exit(1)
+        else:
+            log.critical("Bridge crashed: %s", e, exc_info=True)
+            import time
+            time.sleep(1)
+            sys.exit(1)
