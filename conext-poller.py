@@ -120,24 +120,29 @@ class ModbusTCP:
     def _rx(self, n):
         b = b""
         while len(b) < n:
-            c = self.sock.recv(n - len(b))
+            try:
+                c = self.sock.recv(n - len(b))
+            except socket.timeout:
+                raise ConnectionError("Socket timeout")
             if not c: raise ConnectionError("Socket closed")
             b += c
         return b
 
-    def _read_frame(self):
+    def _read_frame(self, expected_tid):
         # Read MBAP header minus UID to get the exact payload length
         mbap = self._rx(6)
         tid, pid, length = struct.unpack(">HHH", mbap)
         # Read the rest of the frame (UID + PDU) specified by Length
         rest = self._rx(length)
+        if tid != expected_tid:
+            raise ConnectionError(f"Modbus TID mismatch: expected {expected_tid}, got {tid}. TCP stream corrupted!")
         return mbap + rest
 
     def read(self, uid, reg, cnt):
         if not self.sock: raise ConnectionError("Not connected")
         self.tid = (self.tid + 1) & 0xFFFF
         self.sock.sendall(struct.pack(">HHHBBHH", self.tid, 0, 6, uid, 3, reg, cnt))
-        frame = self._read_frame()
+        frame = self._read_frame(self.tid)
         fc = frame[7]
         if fc & 0x80:
             raise Exception("Modbus err fc=%d code=%d" % (fc & 0x7F, frame[8]))
@@ -150,7 +155,7 @@ class ModbusTCP:
         self.tid = (self.tid + 1) & 0xFFFF
         req = struct.pack(">HHHBBHH", self.tid, 0, 6, uid, 6, reg, value)
         self.sock.sendall(req)
-        frame = self._read_frame()
+        frame = self._read_frame(self.tid)
         fc = frame[7]
         if fc & 0x80:
             raise Exception("Modbus write err fc=%d code=%d" % (fc & 0x7F, frame[8]))
