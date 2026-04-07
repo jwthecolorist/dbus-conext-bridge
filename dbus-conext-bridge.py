@@ -212,7 +212,6 @@ class ConextBridge:
                 if self._stale_count % 30 == 1:
                     log.warning("Cache not available (stale count: %d)", self._stale_count)
                 self._set("/Connected", 0)
-                if self.settings['DriverStatus'] != 0: self.settings['DriverStatus'] = 0
                 return True
 
             # Check freshness (stale if >30s old)
@@ -222,13 +221,11 @@ class ConextBridge:
                 if self._stale_count % 30 == 1:
                     log.warning("Cache stale: %.0fs old (stale count: %d)", age, self._stale_count)
                 self._set("/Connected", 0)
-                if self.settings['DriverStatus'] != 0: self.settings['DriverStatus'] = 0
                 return True
 
             self._stale_count = 0
             self._cache_ts = ts
             self._set("/Connected", 1)
-            if self.settings['DriverStatus'] != 1: self.settings['DriverStatus'] = 1
 
             # Collect data from ALL inverter units
             all_units = [units.get(str(uid), {}) for uid in UNIT_IDS]
