@@ -426,12 +426,11 @@ class ConextBridge:
                 info = json.load(f).get("info", {})
                 gw = info.get("GatewaySerial", info.get("MasterSerial"))
                 if gw: boot_serial = gw
-                fw = info.get("GatewayFirmware", info.get("MasterFirmware"))
-                if fw: boot_fw = fw
         except: pass
         
         s.add_path("/CustomName", CUSTOM_NAME)
-        s.add_path("/FirmwareVersion", boot_fw)
+        # Victron DVCC strongly asserts integer firmware. Strings violently crash dbus-systemcalc-py.
+        s.add_path("/FirmwareVersion", 497)
         s.add_path("/Serial", boot_serial)
         s.add_path("/Connected", 1)
         
