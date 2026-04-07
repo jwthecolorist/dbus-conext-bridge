@@ -299,28 +299,28 @@ class ConextBridge:
                     self._set("/Ac/ActiveIn/L1/P", round(ac_in_total / 2))
                     self._set("/Ac/ActiveIn/L2/P", round(ac_in_total / 2))
                 else:
-                    self._set("/Ac/ActiveIn/L1/P", None)
-                    self._set("/Ac/ActiveIn/L2/P", None)
+                    self._set("/Ac/ActiveIn/L1/P", 0)
+                    self._set("/Ac/ActiveIn/L2/P", 0)
             elif active_input == 1 and ac2_connected:
                 # Generator connected
                 self._set("/Ac/ActiveIn/L1/F", ac2_freq)
                 ac_in_l1_v = _safe_first(*[u.get("AC2L1Voltage") for u in all_units])
                 ac_in_l1_i = _safe_add(*[u.get("AC2L1Current") for u in all_units])
-                self._set("/Ac/ActiveIn/L1/V", round(ac_in_l1_v, 1) if ac_in_l1_v else None)
-                self._set("/Ac/ActiveIn/L1/I", round(ac_in_l1_i, 2) if ac_in_l1_i else None)
+                self._set("/Ac/ActiveIn/L1/V", round(ac_in_l1_v, 1) if ac_in_l1_v else 0)
+                self._set("/Ac/ActiveIn/L1/I", round(ac_in_l1_i, 2) if ac_in_l1_i else 0)
                 self._set("/Ac/ActiveIn/L2/F", ac2_freq)
-                self._set("/Ac/ActiveIn/L2/V", None)
-                self._set("/Ac/ActiveIn/L2/I", None)
+                self._set("/Ac/ActiveIn/L2/V", 0)
+                self._set("/Ac/ActiveIn/L2/I", 0)
                 ac_in_total = _safe_add(*[u.get("AC2Power") for u in all_units])
-                self._set("/Ac/ActiveIn/L1/P", round(ac_in_total / 2) if ac_in_total else None)
-                self._set("/Ac/ActiveIn/L2/P", round(ac_in_total / 2) if ac_in_total else None)
+                self._set("/Ac/ActiveIn/L1/P", round(ac_in_total / 2) if ac_in_total else 0)
+                self._set("/Ac/ActiveIn/L2/P", round(ac_in_total / 2) if ac_in_total else 0)
             else:
                 # No AC input
                 for leg in ["L1", "L2"]:
-                    self._set("/Ac/ActiveIn/%s/F" % leg, None)
-                    self._set("/Ac/ActiveIn/%s/V" % leg, None)
-                    self._set("/Ac/ActiveIn/%s/I" % leg, None)
-                    self._set("/Ac/ActiveIn/%s/P" % leg, None)
+                    self._set("/Ac/ActiveIn/%s/F" % leg, 0)
+                    self._set("/Ac/ActiveIn/%s/V" % leg, 0)
+                    self._set("/Ac/ActiveIn/%s/I" % leg, 0)
+                    self._set("/Ac/ActiveIn/%s/P" % leg, 0)
                 ac_in_total = 0
             self._set("/Ac/ActiveIn/P", round(ac_in_total) if ac_in_total else 0)
 
@@ -504,7 +504,6 @@ class ConextBridge:
         s.add_path("/FirmwareFeatures/BolFrame", 1)
         s.add_path("/FirmwareFeatures/BolUBatAndTBatSense", 1)
         s.add_path("/FirmwareFeatures/CommandWriteViaId", 1)
-        s.add_path("/FirmwareFeatures/IBatSOCBroadcast", 1)
         s.add_path("/FirmwareFeatures/NewPanelFrame", 1)
         s.add_path("/FirmwareFeatures/SetChargeState", 1)
         s.add_path("/FirmwareSubVersion", 0)
