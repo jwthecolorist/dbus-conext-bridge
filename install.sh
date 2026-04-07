@@ -47,10 +47,11 @@ echo "  Created service/run"
 # Create log service
 cat > "$INSTALL_DIR/service/log/run" << 'EOF'
 #!/bin/sh
-exec svlogd -tt /var/log/dbus-conext-bridge
+exec 2>&1
+mkdir -p /var/log/dbus-conext-bridge
+exec multilog t s25000 n4 /var/log/dbus-conext-bridge
 EOF
 chmod +x "$INSTALL_DIR/service/log/run"
-mkdir -p /var/log/dbus-conext-bridge
 echo "  Created service/log/run"
 
 # Register runit service (symlink to /service)
