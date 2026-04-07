@@ -59,6 +59,7 @@ if [ -f /data/rc.local ]; then
         echo "exit 0" >> /data/rc.local
         logger "conext-bridge: Registered in rc.local"
     fi
+    chmod +x /data/rc.local
 else
     printf '#!/bin/sh\n# --- Conext Bridge (auto-installed) ---\n[ -x /data/dbus-conext-bridge/setup.sh ] && /data/dbus-conext-bridge/setup.sh\nexit 0\n' > /data/rc.local
     chmod +x /data/rc.local

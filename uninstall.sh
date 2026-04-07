@@ -23,6 +23,7 @@ pkill -f conext-poller.py || true
 # Remove startup hook
 if [ -f "/data/rc.local" ]; then
     sed -i '/dbus-conext-bridge/d' /data/rc.local
+    sed -i '/--- Conext Bridge/d' /data/rc.local
     echo "  Removed rc.local hook"
 fi
 
