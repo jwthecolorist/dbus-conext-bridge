@@ -1,2 +1,4 @@
 #!/bin/sh
-exec svlogd -tt /var/log/dbus-conext-bridge
+exec 2>&1
+mkdir -p /var/log/dbus-conext-bridge
+exec multilog t s25000 n4 /var/log/dbus-conext-bridge

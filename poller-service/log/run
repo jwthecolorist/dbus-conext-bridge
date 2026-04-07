@@ -1,2 +1,4 @@
 #!/bin/sh
-exec svlogd -tt /var/log/conext-poller
+exec 2>&1
+mkdir -p /var/log/conext-poller
+exec multilog t s25000 n4 /var/log/conext-poller
