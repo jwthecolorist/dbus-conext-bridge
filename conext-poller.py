@@ -206,6 +206,8 @@ def poll_unit(client, uid):
             d[name] = read_reg(client, uid, name)
             if INTER_READ_DELAY > 0:
                 time.sleep(INTER_READ_DELAY)
+        except ConnectionError:
+            raise  # Crucial: re-raise socket closures to trigger reconnection
         except Exception as e:
             log.debug("UID%d read %s failed: %s", uid, name, e)
             d[name] = None

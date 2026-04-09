@@ -182,8 +182,7 @@ class ConextBridge:
         elif setting == 'ScanRequested' and newvalue == 1:
             log.info("Auto-Scan requested by GUI. Running conext-scanner.py...")
             # Run scanner script asynchronously to avoid blocking the DBus GLib thread
-            import subprocess
-            subprocess.Popen(["python3", "/data/dbus-conext-bridge/conext-scanner.py"])
+            os.system("python3 /data/dbus-conext-bridge/conext-scanner.py &")
             
             # The python script writes directly to DBus, which will trigger our other setting callbacks.
             # But the scanner takes ~10 seconds. We just reset the GUI flag.
